@@ -1,0 +1,15 @@
+[package]
+name = "tidysql-wasm"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+getrandom = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+tidysql = { path = "../tidysql" }
+tidysql-config = { path = "../tidysql-config" }
+wasm-bindgen = "0.2"

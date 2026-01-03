@@ -1,0 +1,10 @@
+[package]
+name = "tidysql"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tidysql-formatter = { path = "../tidysql-formatter" }
+tidysql-syntax = { path = "../tidysql-syntax" }
+tidysql-config = { path = "../tidysql-config" }
+clap = { workspace = true }

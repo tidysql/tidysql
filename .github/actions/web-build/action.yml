@@ -1,0 +1,83 @@
+name: Web build (wasm + node)
+description: Build the Rust WASM package and the web frontend with optional linting.
+
+inputs:
+  node-version:
+    description: Node.js version
+    required: false
+    default: "20"
+  run-lint:
+    description: Whether to run `npm run lint`
+    required: false
+    default: "false"
+  base-url:
+    description: BASE_URL to pass to `npm run build` (empty means do not set)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Rust (stable + wasm target)
+      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+      with:
+        toolchain: stable
+        targets: wasm32-unknown-unknown
+
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+
+    - name: Install wasm-pack
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v wasm-pack >/dev/null 2>&1; then
+          cargo install wasm-pack --locked
+        fi
+
+    - name: Build wasm
+      shell: bash
+      working-directory: crates/tidysql-wasm
+      run: |
+        set -euo pipefail
+        wasm-pack build --target web --out-dir "${GITHUB_WORKSPACE}/web/src/tidysql-wasm"
+
+    - name: Setup Node
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: web
+      run: |
+        set -euo pipefail
+        npm ci
+
+    - name: Lint
+      if: ${{ inputs.run-lint == 'true' }}
+      shell: bash
+      working-directory: web
+      run: |
+        set -euo pipefail
+        npm run lint
+
+    - name: Build (no BASE_URL)
+      if: ${{ inputs.base-url == '' }}
+      shell: bash
+      working-directory: web
+      run: |
+        set -euo pipefail
+        npm run build
+
+    - name: Build (with BASE_URL)
+      if: ${{ inputs.base-url != '' }}
+      shell: bash
+      working-directory: web
+      env:
+        BASE_URL: ${{ inputs.base-url }}
+      run: |
+        set -euo pipefail
+        npm run build

@@ -1,0 +1,123 @@
+:root {
+  font-family: "Space Grotesk", "Noto Sans", sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --primary: #135bec;
+  --background-light: #ffffff;
+  --background-subtle: #f8f9fc;
+  --border-light: #e7ebf3;
+  --border-darker: #d2d8e4;
+  --text-main: #0d121b;
+  --text-muted: #4c669a;
+  --editor-bg: #ffffff;
+  --editor-gutter: #f4f5f8;
+  --code-keyword: #a626a4;
+  --code-string: #50a14f;
+  --code-func: #4078f2;
+  --severity-error: #ef4444;
+  --severity-warning: #f59e0b;
+  --severity-style: #6b7280;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--background-subtle);
+  background-image: radial-gradient(
+      circle at top left,
+      rgba(255, 255, 255, 0.9),
+      rgba(248, 249, 252, 0.2) 45%,
+      rgba(232, 237, 248, 0.8) 100%
+    ),
+    linear-gradient(120deg, rgba(19, 91, 236, 0.06), transparent 45%);
+  color: var(--text-main);
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(19, 91, 236, 0.16);
+}
+
+#monaco-overlays {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: transparent;
+  pointer-events: none;
+}
+
+#monaco-overlays .monaco-hover,
+#monaco-overlays .suggest-widget,
+#monaco-overlays .parameter-hints-widget {
+  pointer-events: auto;
+}
+
+.error-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--background-subtle);
+  color: var(--text-main);
+}
+
+.error-card {
+  width: min(520px, 100%);
+  background: var(--background-light);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+.error-title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.error-message {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.error-details {
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: #f4f6fb;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: #374151;
+}

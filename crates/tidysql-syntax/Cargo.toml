@@ -1,0 +1,10 @@
+[package]
+name = "tidysql-syntax"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+text-size = { workspace = true }
+sqruff-parser-core = { workspace = true }
+sqruff-lib-dialects = { workspace = true }
+get-size2 = { workspace = true, features = ["derive"] }
