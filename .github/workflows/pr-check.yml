@@ -63,3 +63,19 @@ jobs:
         run: cargo +stable clippy --workspace --all-targets --all-features -- -D warnings
       - name: Cargo test
         run: cargo +stable test --workspace
+
+  cargo-deny:
+    name: Cargo deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Cargo deny
+        uses: EmbarkStudios/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
+        with:
+          command: check bans licenses sources

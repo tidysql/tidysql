@@ -2,6 +2,7 @@
 name = "tidysql-formatter"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 tidysql-syntax = { path = "../tidysql-syntax" }
