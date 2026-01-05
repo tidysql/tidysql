@@ -5,5 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+regex = "1.12"
 serde = { workspace = true }
+serde-untagged = { workspace = true }
 toml = { workspace = true }

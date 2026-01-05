@@ -1,0 +1,18 @@
+[package]
+name = "tidysql-lints"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tidysql-config = { workspace = true }
+tidysql-syntax = { workspace = true }
+
+[dev-dependencies]
+datatest-stable = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[[test]]
+name = "lint_suites"
+harness = false

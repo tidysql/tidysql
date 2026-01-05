@@ -1,0 +1,131 @@
+use std::ops::Range;
+
+use tidysql_config::{Config, LintLevel};
+use tidysql_syntax::{
+    DialectKind, Fix, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, SyntaxTree, TextRange,
+};
+
+mod disallow_names;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+#[derive(Debug, Clone)]
+pub struct Diagnostic {
+    pub code: &'static str,
+    pub message: String,
+    pub severity: Severity,
+    pub range: Range<usize>,
+    pub fix: Option<Fix>,
+}
+
+impl Diagnostic {
+    pub fn new(
+        code: &'static str,
+        message: impl Into<String>,
+        severity: Severity,
+        range: Range<usize>,
+    ) -> Self {
+        Self { code, message: message.into(), severity, range, fix: None }
+    }
+
+    pub fn from_text_range(
+        code: &'static str,
+        message: impl Into<String>,
+        severity: Severity,
+        range: TextRange,
+    ) -> Self {
+        Self::new(code, message, severity, text_range_to_range(range))
+    }
+
+    pub fn with_fix(mut self, fix: Fix) -> Self {
+        self.fix = Some(fix);
+        self
+    }
+}
+
+pub(crate) struct LintContext<'a> {
+    #[allow(dead_code)]
+    pub(crate) source: &'a str,
+    #[allow(dead_code)]
+    pub(crate) dialect: DialectKind,
+    #[allow(dead_code)]
+    pub(crate) tree: &'a SyntaxTree,
+    pub(crate) config: &'a Config,
+}
+
+#[allow(dead_code)]
+pub(crate) trait NodeLint {
+    const CODE: &'static str;
+    const MESSAGE: &'static str;
+    const SEVERITY: Severity;
+    const TARGET: SyntaxKind;
+
+    fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>);
+}
+
+pub(crate) trait TokenLint {
+    const CODE: &'static str;
+    #[allow(dead_code)]
+    const MESSAGE: &'static str;
+    #[allow(dead_code)]
+    const SEVERITY: Severity;
+    fn matches(kind: SyntaxKind) -> bool;
+
+    fn check(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>);
+}
+
+pub fn run<'a>(
+    source: &'a str,
+    dialect: DialectKind,
+    tree: &'a SyntaxTree,
+    config: &'a Config,
+) -> Vec<Diagnostic> {
+    let ctx = LintContext { source, dialect, tree, config };
+    let mut diagnostics = Vec::new();
+
+    for element in tree.root().descendants_with_tokens() {
+        match element {
+            SyntaxElement::Node(node) => run_node_lints(&ctx, &node, &mut diagnostics),
+            SyntaxElement::Token(token) => run_token_lints(&ctx, &token, &mut diagnostics),
+        }
+    }
+
+    diagnostics
+}
+
+fn run_node_lints(_ctx: &LintContext<'_>, _node: &SyntaxNode, _diagnostics: &mut Vec<Diagnostic>) {}
+
+fn run_token_lints(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
+    run_token_lint::<disallow_names::DisallowNames>(ctx, token, diagnostics);
+}
+
+fn run_token_lint<L: TokenLint>(
+    ctx: &LintContext<'_>,
+    token: &SyntaxToken,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if L::matches(token.kind()) {
+        L::check(ctx, token, diagnostics);
+    }
+}
+
+pub(crate) fn lint_level_to_severity(level: LintLevel) -> Severity {
+    match level {
+        LintLevel::Error => Severity::Error,
+        LintLevel::Warn => Severity::Warning,
+        LintLevel::Info => Severity::Info,
+        LintLevel::Hint => Severity::Hint,
+    }
+}
+
+fn text_range_to_range(range: TextRange) -> Range<usize> {
+    let start = usize::from(range.start());
+    let end = usize::from(range.end());
+    start..end
+}

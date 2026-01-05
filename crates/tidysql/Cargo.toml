@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tidysql-formatter = { path = "../tidysql-formatter" }
-tidysql-syntax = { path = "../tidysql-syntax" }
-tidysql-config = { path = "../tidysql-config" }
+tidysql-formatter = { workspace = true }
+tidysql-lints = { workspace = true }
+tidysql-syntax = { workspace = true }
+tidysql-config = { workspace = true }
 clap = { workspace = true }

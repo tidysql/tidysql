@@ -1,0 +1,42 @@
+[[case]]
+name = "basic"
+sql = "select foo from bar"
+
+[case.config.lints]
+disallow_names = { names = ["foo"] }
+
+[[case.expect]]
+code = "disallow_names"
+message = "Disallowed name: foo."
+severity = "warning"
+
+[[case]]
+name = "error-level"
+sql = "select foo from bar"
+
+[case.config.lints]
+disallow_names = { level = "error", names = ["foo"] }
+
+[[case.expect]]
+code = "disallow_names"
+message = "Disallowed name: foo."
+severity = "error"
+
+[[case]]
+name = "regex"
+sql = "select TMP_TABLE from foo"
+
+[case.config.lints]
+disallow_names = { regexes = ["^TMP_"] }
+
+[[case.expect]]
+code = "disallow_names"
+message = "Disallowed name: TMP_TABLE."
+severity = "warning"
+
+[[case]]
+name = "skip-comments"
+sql = "-- foo\nselect bar"
+
+[case.config.lints]
+disallow_names = { names = ["foo"] }

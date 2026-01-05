@@ -1,11 +1,5 @@
 [workspace]
-members = [
-  "crates/tidysql",
-  "crates/tidysql-formatter",
-  "crates/tidysql-config",
-  "crates/tidysql-syntax",
-  "crates/tidysql-wasm",
-]
+members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
@@ -20,6 +14,13 @@ get-size2 = "0.7"
 text-size = "1.1"
 getrandom = { version = "0.2", features = ["js"] }
 serde = { version = "1.0", features = ["derive"] }
+serde-untagged = "0.1.9"
 toml = "0.9.10+spec-1.1.0"
 smol_str = "0.3"
 clap = { version = "4.5.23", features = ["derive"] }
+datatest-stable = "0.3.3"
+tidysql = { path = "crates/tidysql" }
+tidysql-config = { path = "crates/tidysql-config" }
+tidysql-formatter = { path = "crates/tidysql-formatter" }
+tidysql-lints = { path = "crates/tidysql-lints" }
+tidysql-syntax = { path = "crates/tidysql-syntax" }

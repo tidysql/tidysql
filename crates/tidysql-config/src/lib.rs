@@ -1,6 +1,12 @@
+use std::borrow::Cow;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
+use regex::Regex;
+use serde::de::{Deserializer, Error as DeError, SeqAccess, Visitor};
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
+use serde_untagged::UntaggedEnumVisitor;
 
 pub const DEFAULT_CONFIG_FILE: &str = "tidysql.toml";
 
@@ -87,10 +93,156 @@ pub struct Core {
     pub dialect: Dialect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LintLevel {
+    Error,
+    #[default]
+    Warn,
+    Info,
+    Hint,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "LintRuleDef<T>")]
+#[serde(bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de> + Default"))]
+pub struct LintRule<T> {
+    pub level: LintLevel,
+    pub options: T,
+}
+
+impl<T: Default> Default for LintRule<T> {
+    fn default() -> Self {
+        Self { level: LintLevel::Warn, options: T::default() }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+enum LintRuleDef<T> {
+    Level(LintLevel),
+    Table(LintRuleTable<T>),
+    Options(T),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+struct LintRuleTable<T> {
+    #[serde(default)]
+    level: Option<LintLevel>,
+    #[serde(flatten)]
+    options: T,
+}
+
+impl<T: Default> From<LintRuleDef<T>> for LintRule<T> {
+    fn from(definition: LintRuleDef<T>) -> Self {
+        match definition {
+            LintRuleDef::Level(level) => Self { level, options: T::default() },
+            LintRuleDef::Options(options) => Self { level: LintLevel::Warn, options },
+            LintRuleDef::Table(table) => {
+                let level = table.level.unwrap_or_default();
+                Self { level, options: table.options }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DisallowNamesConfig {
+    pub names: Vec<String>,
+    #[serde(serialize_with = "serialize_disallow_name_regexes")]
+    pub regexes: Vec<Regex>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DisallowNamesConfigTable {
+    names: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_disallow_name_regexes")]
+    regexes: Vec<Regex>,
+}
+
+impl<'de> Deserialize<'de> for DisallowNamesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        UntaggedEnumVisitor::new()
+            .expecting("a list of names or a table with names/regexes")
+            .seq(|seq| {
+                let names: Vec<String> = seq.deserialize()?;
+                Ok(Self { names, regexes: Vec::new() })
+            })
+            .map(|map| {
+                let table: DisallowNamesConfigTable = map.deserialize()?;
+                Ok(Self { names: table.names, regexes: table.regexes })
+            })
+            .deserialize(deserializer)
+    }
+}
+
+fn deserialize_disallow_name_regexes<'de, D>(deserializer: D) -> Result<Vec<Regex>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct RegexesVisitor;
+
+    impl<'de> Visitor<'de> for RegexesVisitor {
+        type Value = Vec<Regex>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a list of regex patterns")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut compiled = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            let mut index = 0;
+
+            while let Some(pattern) = seq.next_element::<Cow<'de, str>>()? {
+                match Regex::new(pattern.as_ref()) {
+                    Ok(regex) => compiled.push(regex),
+                    Err(error) => {
+                        return Err(DeError::custom(format!(
+                            "invalid lints.disallow_names.regexes[{index}] (`{pattern}`): {error}"
+                        )));
+                    }
+                }
+                index += 1;
+            }
+
+            Ok(compiled)
+        }
+    }
+
+    deserializer.deserialize_seq(RegexesVisitor)
+}
+
+fn serialize_disallow_name_regexes<S>(regexes: &[Regex], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut seq = serializer.serialize_seq(Some(regexes.len()))?;
+    for regex in regexes {
+        seq.serialize_element(regex.as_str())?;
+    }
+    seq.end()
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Lints {
+    pub disallow_names: LintRule<DisallowNamesConfig>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub core: Core,
+    pub lints: Lints,
 }
 
 #[derive(Debug)]
