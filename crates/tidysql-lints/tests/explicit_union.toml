@@ -1,0 +1,205 @@
+[[case]]
+name = "test_pass_union_all"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION ALL
+SELECT
+  c,
+  d
+FROM tbl1
+"""
+
+[[case]]
+name = "test_fail_bare_union"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION
+SELECT
+  c,
+  d
+FROM tbl1
+"""
+fixed_sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION DISTINCT
+SELECT
+  c,
+  d
+FROM tbl1
+"""
+
+[[case.expect]]
+code = "explicit_union"
+message = "Use UNION DISTINCT or UNION ALL."
+severity = "warning"
+
+[[case]]
+name = "test_pass_union_distinct"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION DISTINCT
+SELECT
+  c,
+  d
+FROM tbl1
+"""
+
+[[case]]
+name = "test_pass_union_distinct_with_comment"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl
+
+--selecting a and b
+
+UNION DISTINCT
+
+SELECT
+  c,
+  d
+FROM tbl1
+"""
+
+[[case]]
+name = "test_fail_triple_join_with_one_bad"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION DISTINCT
+SELECT
+  c,
+  d
+FROM tbl1
+UNION
+SELECT
+  e,
+  f
+FROM tbl2
+"""
+fixed_sql = """
+SELECT
+  a,
+  b
+FROM tbl
+UNION DISTINCT
+SELECT
+  c,
+  d
+FROM tbl1
+UNION DISTINCT
+SELECT
+  e,
+  f
+FROM tbl2
+"""
+
+[[case.expect]]
+code = "explicit_union"
+message = "Use UNION DISTINCT or UNION ALL."
+severity = "warning"
+
+[[case]]
+name = "test_fail_triple_join_with_one_bad_lowercase"
+sql = """
+select
+  a,
+  b
+from tbl
+union distinct
+select
+  c,
+  d
+from tbl1
+union
+select
+  e,
+  f
+from tbl2
+"""
+fixed_sql = """
+select
+  a,
+  b
+from tbl
+union distinct
+select
+  c,
+  d
+from tbl1
+union distinct
+select
+  e,
+  f
+from tbl2
+"""
+
+[[case.expect]]
+code = "explicit_union"
+message = "Use UNION DISTINCT or UNION ALL."
+severity = "warning"
+
+[[case]]
+name = "test_postgres"
+sql = """
+select
+  a,
+  b
+from tbl1
+union
+select
+  c,
+  d
+from tbl2
+"""
+
+[case.config.core]
+dialect = "postgres"
+
+[[case]]
+name = "test_redshift"
+sql = """
+SELECT
+  a,
+  b
+FROM tbl1
+UNION
+SELECT
+  c,
+  d
+FROM tbl2
+"""
+fixed_sql = """
+SELECT
+  a,
+  b
+FROM tbl1
+UNION DISTINCT
+SELECT
+  c,
+  d
+FROM tbl2
+"""
+
+[case.config.core]
+dialect = "redshift"
+
+[[case.expect]]
+code = "explicit_union"
+message = "Use UNION DISTINCT or UNION ALL."
+severity = "warning"

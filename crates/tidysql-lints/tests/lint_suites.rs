@@ -3,7 +3,7 @@ use std::path::Path;
 use serde::Deserialize;
 use tidysql_config::{Config, Dialect};
 use tidysql_lints::Severity;
-use tidysql_syntax::DialectKind;
+use tidysql_syntax::{DialectKind, EditError, apply_edits};
 
 #[derive(Deserialize)]
 struct LintSuite {
@@ -20,6 +20,8 @@ struct LintCase {
     config: Config,
     #[serde(default)]
     expect: Vec<ExpectedDiagnostic>,
+    #[serde(default)]
+    fixed_sql: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +91,12 @@ fn run_single_case(path: &Path, case_index: usize, case: &LintCase) -> datatest_
         }
     }
 
+    if let Some(expected) = &case.fixed_sql {
+        let fixed =
+            apply_fixes(&case.sql, &diagnostics).map_err(|error| format!("{label}: {error:?}"))?;
+        assert_eq!(&fixed, expected, "fixed sql mismatch ({label}) in {}", path.display(),);
+    }
+
     Ok(())
 }
 
@@ -126,6 +134,25 @@ fn case_label(case: &LintCase, case_index: usize) -> String {
         Some(name) => format!("{name} (#{case_index})"),
         None => format!("case #{case_index}"),
     }
+}
+
+fn apply_fixes(
+    source: &str,
+    diagnostics: &[tidysql_lints::Diagnostic],
+) -> Result<String, EditError> {
+    let mut edits = Vec::new();
+
+    for diagnostic in diagnostics {
+        if let Some(fix) = &diagnostic.fix {
+            edits.extend(fix.edits.iter().cloned());
+        }
+    }
+
+    if edits.is_empty() {
+        return Ok(source.to_string());
+    }
+
+    apply_edits(source, edits)
 }
 
 datatest_stable::harness! {

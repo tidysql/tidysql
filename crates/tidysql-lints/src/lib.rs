@@ -7,6 +7,7 @@ use tidysql_syntax::{
 };
 
 mod disallow_names;
+mod explicit_union;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -45,7 +46,6 @@ impl Diagnostic {
 pub(crate) struct LintContext<'a> {
     #[expect(dead_code)]
     pub(crate) source: &'a str,
-    #[expect(dead_code)]
     pub(crate) dialect: DialectKind,
     #[expect(dead_code)]
     pub(crate) tree: &'a SyntaxTree,
@@ -96,13 +96,14 @@ pub fn run<'a>(
     diagnostics
 }
 
-fn run_node_lints(_ctx: &LintContext<'_>, _node: &SyntaxNode, _diagnostics: &mut Vec<Diagnostic>) {}
+fn run_node_lints(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>) {
+    run_node_lint::<explicit_union::ExplicitUnion>(ctx, node, diagnostics);
+}
 
 fn run_token_lints(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
     run_token_lint::<disallow_names::DisallowNames>(ctx, token, diagnostics);
 }
 
-#[expect(dead_code)]
 fn run_node_lint<L: NodeLint>(
     ctx: &LintContext<'_>,
     node: &SyntaxNode,

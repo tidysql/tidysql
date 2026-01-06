@@ -124,17 +124,19 @@ pub const DIALECTS: &[Dialect] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintName {
     DisallowNames,
+    ExplicitUnion,
 }
 
 impl LintName {
     pub const fn as_str(&self) -> &'static str {
         match self {
             LintName::DisallowNames => "disallow_names",
+            LintName::ExplicitUnion => "explicit_union",
         }
     }
 }
 
-pub const LINTS: &[LintName] = &[LintName::DisallowNames];
+pub const LINTS: &[LintName] = &[LintName::DisallowNames, LintName::ExplicitUnion];
 
 #[derive(Debug, Clone)]
 pub struct LintNameParseError {
@@ -188,18 +190,18 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct LintRule<T> {
+pub struct LintConfig<T> {
     pub level: Severity,
     pub options: T,
 }
 
-impl<T: Default> Default for LintRule<T> {
+impl<T: Default> Default for LintConfig<T> {
     fn default() -> Self {
         Self { level: Severity::Warn, options: T::default() }
     }
 }
 
-impl<'de, T> Deserialize<'de> for LintRule<T>
+impl<'de, T> Deserialize<'de> for LintConfig<T>
 where
     T: Deserialize<'de> + Default,
 {
@@ -211,15 +213,15 @@ where
             .expecting("a severity, an options array, or a table with level and options")
             .string(|value| {
                 Severity::deserialize(value.into_deserializer())
-                    .map(|level| LintRule { level, options: T::default() })
+                    .map(|level| LintConfig { level, options: T::default() })
             })
             .seq(|seq| {
                 let options = seq.deserialize()?;
-                Ok(LintRule { level: Severity::Warn, options })
+                Ok(LintConfig { level: Severity::Warn, options })
             })
             .map(|map| {
-                let table: LintRuleTable<T> = map.deserialize()?;
-                Ok(LintRule { level: table.level.unwrap_or_default(), options: table.options })
+                let table: LintConfigTable<T> = map.deserialize()?;
+                Ok(LintConfig { level: table.level.unwrap_or_default(), options: table.options })
             })
             .deserialize(deserializer)
     }
@@ -227,12 +229,16 @@ where
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
-struct LintRuleTable<T> {
+struct LintConfigTable<T> {
     #[serde(default)]
     level: Option<Severity>,
     #[serde(flatten)]
     options: T,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExplicitUnionConfig {}
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DisallowNamesConfig {
@@ -321,7 +327,8 @@ where
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Lints {
-    pub disallow_names: LintRule<DisallowNamesConfig>,
+    pub disallow_names: LintConfig<DisallowNamesConfig>,
+    pub explicit_union: LintConfig<ExplicitUnionConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
