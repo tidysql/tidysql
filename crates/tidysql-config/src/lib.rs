@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use serde::de::{Deserializer, Error as DeError, SeqAccess, Visitor};
+use serde::de::{Deserializer, Error as DeError, IntoDeserializer, SeqAccess, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use serde_untagged::UntaggedEnumVisitor;
@@ -187,9 +187,7 @@ pub enum Severity {
     Allow,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(from = "LintRuleDef<T>")]
-#[serde(bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de> + Default"))]
+#[derive(Debug, Clone, Serialize)]
 pub struct LintRule<T> {
     pub level: Severity,
     pub options: T,
@@ -201,13 +199,30 @@ impl<T: Default> Default for LintRule<T> {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-#[serde(bound(deserialize = "T: Deserialize<'de>"))]
-enum LintRuleDef<T> {
-    Level(Severity),
-    Table(LintRuleTable<T>),
-    Options(T),
+impl<'de, T> Deserialize<'de> for LintRule<T>
+where
+    T: Deserialize<'de> + Default,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        UntaggedEnumVisitor::new()
+            .expecting("a severity, an options array, or a table with level and options")
+            .string(|value| {
+                Severity::deserialize(value.into_deserializer())
+                    .map(|level| LintRule { level, options: T::default() })
+            })
+            .seq(|seq| {
+                let options = seq.deserialize()?;
+                Ok(LintRule { level: Severity::Warn, options })
+            })
+            .map(|map| {
+                let table: LintRuleTable<T> = map.deserialize()?;
+                Ok(LintRule { level: table.level.unwrap_or_default(), options: table.options })
+            })
+            .deserialize(deserializer)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -217,19 +232,6 @@ struct LintRuleTable<T> {
     level: Option<Severity>,
     #[serde(flatten)]
     options: T,
-}
-
-impl<T: Default> From<LintRuleDef<T>> for LintRule<T> {
-    fn from(definition: LintRuleDef<T>) -> Self {
-        match definition {
-            LintRuleDef::Level(level) => Self { level, options: T::default() },
-            LintRuleDef::Options(options) => Self { level: Severity::Warn, options },
-            LintRuleDef::Table(table) => {
-                let level = table.level.unwrap_or_default();
-                Self { level, options: table.options }
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
