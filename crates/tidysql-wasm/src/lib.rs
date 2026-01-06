@@ -97,7 +97,7 @@ impl Workspace {
 fn map_severity(severity: tidysql::Severity) -> String {
     match severity {
         tidysql::Severity::Error => "error".to_string(),
-        tidysql::Severity::Warning => "warning".to_string(),
+        tidysql::Severity::Warn => "warning".to_string(),
         tidysql::Severity::Info => "info".to_string(),
         tidysql::Severity::Hint => "hint".to_string(),
     }

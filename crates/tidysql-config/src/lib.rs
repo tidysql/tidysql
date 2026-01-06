@@ -95,7 +95,7 @@ pub struct Core {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum LintLevel {
+pub enum Severity {
     Error,
     #[default]
     Warn,
@@ -107,13 +107,13 @@ pub enum LintLevel {
 #[serde(from = "LintRuleDef<T>")]
 #[serde(bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de> + Default"))]
 pub struct LintRule<T> {
-    pub level: LintLevel,
+    pub level: Severity,
     pub options: T,
 }
 
 impl<T: Default> Default for LintRule<T> {
     fn default() -> Self {
-        Self { level: LintLevel::Warn, options: T::default() }
+        Self { level: Severity::Warn, options: T::default() }
     }
 }
 
@@ -121,7 +121,7 @@ impl<T: Default> Default for LintRule<T> {
 #[serde(untagged)]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 enum LintRuleDef<T> {
-    Level(LintLevel),
+    Level(Severity),
     Table(LintRuleTable<T>),
     Options(T),
 }
@@ -130,7 +130,7 @@ enum LintRuleDef<T> {
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct LintRuleTable<T> {
     #[serde(default)]
-    level: Option<LintLevel>,
+    level: Option<Severity>,
     #[serde(flatten)]
     options: T,
 }
@@ -139,7 +139,7 @@ impl<T: Default> From<LintRuleDef<T>> for LintRule<T> {
     fn from(definition: LintRuleDef<T>) -> Self {
         match definition {
             LintRuleDef::Level(level) => Self { level, options: T::default() },
-            LintRuleDef::Options(options) => Self { level: LintLevel::Warn, options },
+            LintRuleDef::Options(options) => Self { level: Severity::Warn, options },
             LintRuleDef::Table(table) => {
                 let level = table.level.unwrap_or_default();
                 Self { level, options: table.options }

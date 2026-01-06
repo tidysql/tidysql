@@ -1,19 +1,12 @@
 use std::ops::Range;
 
-use tidysql_config::{Config, LintLevel};
+use tidysql_config::Config;
+pub use tidysql_config::Severity;
 use tidysql_syntax::{
     DialectKind, Fix, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, SyntaxTree, TextRange,
 };
 
 mod disallow_names;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-    Hint,
-}
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -112,15 +105,6 @@ fn run_token_lint<L: TokenLint>(
 ) {
     if L::matches(token.kind()) {
         L::check(ctx, token, diagnostics);
-    }
-}
-
-pub(crate) fn lint_level_to_severity(level: LintLevel) -> Severity {
-    match level {
-        LintLevel::Error => Severity::Error,
-        LintLevel::Warn => Severity::Warning,
-        LintLevel::Info => Severity::Info,
-        LintLevel::Hint => Severity::Hint,
     }
 }
 

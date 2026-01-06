@@ -114,7 +114,7 @@ fn config_dialect(config: &Config) -> DialectKind {
 fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",
-        Severity::Warning => "warning",
+        Severity::Warn => "warning",
         Severity::Info => "info",
         Severity::Hint => "hint",
     }

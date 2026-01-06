@@ -1,13 +1,13 @@
 use tidysql_syntax::{SyntaxKind, SyntaxToken};
 
-use crate::{Diagnostic, LintContext, Severity, TokenLint, lint_level_to_severity};
+use crate::{Diagnostic, LintContext, Severity, TokenLint};
 
 pub(crate) struct DisallowNames;
 
 impl TokenLint for DisallowNames {
     const CODE: &'static str = "disallow_names";
     const MESSAGE: &'static str = "Disallowed name.";
-    const SEVERITY: Severity = Severity::Warning;
+    const SEVERITY: Severity = Severity::Warn;
 
     fn matches(kind: SyntaxKind) -> bool {
         !matches!(kind, SyntaxKind::Comment | SyntaxKind::InlineComment | SyntaxKind::BlockComment)
@@ -51,7 +51,7 @@ impl TokenLint for DisallowNames {
 
         let range = token.text_range();
         let message = format!("Disallowed name: {candidate}.");
-        let severity = lint_level_to_severity(ctx.config.lints.disallow_names.level);
+        let severity = ctx.config.lints.disallow_names.level;
         let diagnostic = Diagnostic::from_text_range(Self::CODE, message, severity, range);
         diagnostics.push(diagnostic);
     }
