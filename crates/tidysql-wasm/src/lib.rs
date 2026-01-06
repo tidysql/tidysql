@@ -100,6 +100,7 @@ fn map_severity(severity: tidysql::Severity) -> String {
         tidysql::Severity::Warn => "warning".to_string(),
         tidysql::Severity::Info => "info".to_string(),
         tidysql::Severity::Hint => "hint".to_string(),
+        tidysql::Severity::Allow => unreachable!("Allow diagnostics should be suppressed earlier"),
     }
 }
 

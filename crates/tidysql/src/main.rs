@@ -4,38 +4,166 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "tidysql", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    #[command(flatten)]
+    global_options: GlobalConfigArgs,
+}
+
+#[derive(Args)]
+struct GlobalConfigArgs {
+    #[arg(short, long, value_name = "PATH", global = true)]
+    config: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct ConfigOverrideArgs {
+    #[arg(long, value_name = "DIALECT")]
+    dialect: Option<tidysql_config::Dialect>,
+    #[arg(short = 'A', long, value_name = "LINT")]
+    allow: Vec<tidysql_config::LintName>,
+    #[arg(short = 'W', long, value_name = "LINT")]
+    warn: Vec<tidysql_config::LintName>,
+    #[arg(short = 'D', long, value_name = "LINT")]
+    deny: Vec<tidysql_config::LintName>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    Format {
-        #[arg(value_name = "PATH")]
-        path: Option<PathBuf>,
-        #[arg(short, long, value_name = "PATH")]
-        config: Option<PathBuf>,
-    },
-    Check {
-        #[arg(value_name = "PATH")]
-        path: Option<PathBuf>,
-        #[arg(short, long, value_name = "PATH")]
-        config: Option<PathBuf>,
-        #[arg(long)]
-        fix: bool,
-    },
+    Format(FormatCommand),
+    Check(CheckCommand),
+}
+
+#[derive(Args)]
+struct FormatCommand {
+    #[arg(value_name = "PATH")]
+    path: Option<PathBuf>,
+    #[command(flatten)]
+    config_overrides: ConfigOverrideArgs,
+}
+
+#[derive(Args)]
+struct CheckCommand {
+    #[arg(value_name = "PATH")]
+    path: Option<PathBuf>,
+    #[command(flatten)]
+    config_overrides: ConfigOverrideArgs,
+    #[arg(long)]
+    fix: bool,
+}
+
+struct FormatArguments {
+    path: Option<PathBuf>,
+}
+
+struct CheckArguments {
+    path: Option<PathBuf>,
+    fix: bool,
+}
+
+struct ConfigArguments {
+    config_path: Option<PathBuf>,
+    overrides: ConfigOverrides,
+}
+
+#[derive(Default)]
+struct ConfigOverrides {
+    dialect: Option<tidysql_config::Dialect>,
+    lint_levels: Vec<LintLevelOverride>,
+}
+
+struct LintLevelOverride {
+    lint: tidysql_config::LintName,
+    level: tidysql_config::Severity,
+}
+
+impl ConfigOverrides {
+    fn apply(&self, config: &mut tidysql_config::Config) {
+        if let Some(dialect) = self.dialect {
+            config.core.dialect = dialect;
+        }
+
+        for lint_override in &self.lint_levels {
+            apply_lint_level(config, lint_override.lint, lint_override.level);
+        }
+    }
+}
+
+impl From<ConfigOverrideArgs> for ConfigOverrides {
+    fn from(args: ConfigOverrideArgs) -> Self {
+        let mut lint_levels = Vec::new();
+        lint_levels.extend(
+            args.allow
+                .into_iter()
+                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Allow }),
+        );
+        lint_levels.extend(
+            args.warn
+                .into_iter()
+                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Warn }),
+        );
+        lint_levels.extend(
+            args.deny
+                .into_iter()
+                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Error }),
+        );
+
+        Self { dialect: args.dialect, lint_levels }
+    }
+}
+
+fn apply_lint_level(
+    config: &mut tidysql_config::Config,
+    lint: tidysql_config::LintName,
+    level: tidysql_config::Severity,
+) {
+    match lint {
+        tidysql_config::LintName::DisallowNames => {
+            config.lints.disallow_names.level = level;
+        }
+    }
+}
+
+impl ConfigArguments {
+    fn from_cli_arguments(global_options: GlobalConfigArgs, overrides: ConfigOverrides) -> Self {
+        Self { config_path: global_options.config, overrides }
+    }
+
+    fn load_config(&self, source_path: &Path) -> Result<tidysql_config::Config, String> {
+        let mut config = tidysql_config::load_config(self.config_path.as_deref(), source_path)
+            .map_err(|err| err.to_string())?;
+        self.overrides.apply(&mut config);
+        Ok(config)
+    }
+}
+
+impl FormatCommand {
+    fn partition(self, global_options: GlobalConfigArgs) -> (FormatArguments, ConfigArguments) {
+        let cli = FormatArguments { path: self.path };
+        let overrides = ConfigOverrides::from(self.config_overrides);
+        let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
+        (cli, config_arguments)
+    }
+}
+
+impl CheckCommand {
+    fn partition(self, global_options: GlobalConfigArgs) -> (CheckArguments, ConfigArguments) {
+        let cli = CheckArguments { path: self.path, fix: self.fix };
+        let overrides = ConfigOverrides::from(self.config_overrides);
+        let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
+        (cli, config_arguments)
+    }
 }
 
 fn main() {
-    let cli = Cli::parse();
-    let result = match cli.command {
-        Command::Format { path, config } => format_cmd(path, config),
-        Command::Check { path, config, fix } => check_cmd(path, config, fix),
+    let result = match Cli::parse() {
+        Cli { command: Command::Format(args), global_options } => format(args, global_options),
+        Cli { command: Command::Check(args), global_options } => check(args, global_options),
     };
 
     if let Err(message) = result {
@@ -46,27 +174,28 @@ fn main() {
     }
 }
 
-fn format_cmd(path: Option<PathBuf>, config: Option<PathBuf>) -> Result<(), String> {
-    let input = read_input(path.as_deref()).map_err(|err| err.to_string())?;
-    let source_path = path.as_deref().unwrap_or_else(|| Path::new("."));
-    let config = tidysql_config::load_config(config.as_deref(), source_path)
-        .map_err(|err| err.to_string())?;
+fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
+    let (cli, config_arguments) = args.partition(global_options);
+    let input = read_input(cli.path.as_deref()).map_err(|err| err.to_string())?;
+    let source_path = cli.path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
 
     let formatted = tidysql::format_with_config(&input, &config);
     write_output(&formatted).map_err(|err| err.to_string())
 }
 
-fn check_cmd(path: Option<PathBuf>, config: Option<PathBuf>, fix: bool) -> Result<(), String> {
-    let input = read_input(path.as_deref()).map_err(|err| err.to_string())?;
-    let source_path = path.as_deref().unwrap_or_else(|| Path::new("."));
-    let config = tidysql_config::load_config(config.as_deref(), source_path)
-        .map_err(|err| err.to_string())?;
-    let display_path = path
+fn check(args: CheckCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
+    let (cli, config_arguments) = args.partition(global_options);
+    let input = read_input(cli.path.as_deref()).map_err(|err| err.to_string())?;
+    let source_path = cli.path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let display_path = cli
+        .path
         .as_deref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<stdin>".to_string());
 
-    if fix {
+    if cli.fix {
         let fixed = tidysql::fix_with_config(&input, &config).map_err(|err| err.to_string())?;
         write_output(&fixed).map_err(|err| err.to_string())?;
         let diagnostics = tidysql::check_with_config(&fixed, &config);
@@ -132,6 +261,7 @@ fn level_for_severity(severity: tidysql::Severity) -> Level<'static> {
         tidysql::Severity::Warn => Level::WARNING,
         tidysql::Severity::Info => Level::INFO,
         tidysql::Severity::Hint => Level::HELP,
+        tidysql::Severity::Allow => unreachable!("Allow diagnostics should be suppressed earlier"),
     }
 }
 

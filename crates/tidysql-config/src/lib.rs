@@ -70,6 +70,40 @@ impl Dialect {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct DialectParseError {
+    input: String,
+}
+
+impl fmt::Display for DialectParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut expected = String::new();
+        for (index, dialect) in DIALECTS.iter().enumerate() {
+            if index > 0 {
+                expected.push_str(", ");
+            }
+            expected.push_str(dialect.as_str());
+        }
+
+        write!(f, "invalid dialect '{}', expected one of: {expected}", self.input)
+    }
+}
+
+impl std::error::Error for DialectParseError {}
+
+impl std::str::FromStr for Dialect {
+    type Err = DialectParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let normalized = input.to_ascii_lowercase();
+        DIALECTS
+            .iter()
+            .copied()
+            .find(|dialect| normalized == dialect.as_str())
+            .ok_or_else(|| DialectParseError { input: input.to_string() })
+    }
+}
+
 pub const DIALECTS: &[Dialect] = &[
     Dialect::Ansi,
     Dialect::Athena,
@@ -87,6 +121,55 @@ pub const DIALECTS: &[Dialect] = &[
     Dialect::Tsql,
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintName {
+    DisallowNames,
+}
+
+impl LintName {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            LintName::DisallowNames => "disallow_names",
+        }
+    }
+}
+
+pub const LINTS: &[LintName] = &[LintName::DisallowNames];
+
+#[derive(Debug, Clone)]
+pub struct LintNameParseError {
+    input: String,
+}
+
+impl fmt::Display for LintNameParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut expected = String::new();
+        for (index, lint) in LINTS.iter().enumerate() {
+            if index > 0 {
+                expected.push_str(", ");
+            }
+            expected.push_str(lint.as_str());
+        }
+
+        write!(f, "invalid lint '{}', expected one of: {expected}", self.input)
+    }
+}
+
+impl std::error::Error for LintNameParseError {}
+
+impl std::str::FromStr for LintName {
+    type Err = LintNameParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let normalized = input.to_ascii_lowercase().replace('-', "_");
+        LINTS
+            .iter()
+            .copied()
+            .find(|lint| normalized == lint.as_str())
+            .ok_or_else(|| LintNameParseError { input: input.to_string() })
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Core {
@@ -101,6 +184,7 @@ pub enum Severity {
     Warn,
     Info,
     Hint,
+    Allow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

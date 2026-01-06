@@ -13,6 +13,10 @@ impl TokenLint for DisallowNames {
         !matches!(kind, SyntaxKind::Comment | SyntaxKind::InlineComment | SyntaxKind::BlockComment)
     }
 
+    fn level(config: &tidysql_config::Config) -> Severity {
+        config.lints.disallow_names.level
+    }
+
     fn check(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
         if ctx.config.lints.disallow_names.options.names.is_empty()
             && ctx.config.lints.disallow_names.options.regexes.is_empty()
@@ -52,8 +56,8 @@ impl TokenLint for DisallowNames {
         let range = token.text_range();
         let message = format!("Disallowed name: {candidate}.");
         let severity = ctx.config.lints.disallow_names.level;
-        let diagnostic = Diagnostic::from_text_range(Self::CODE, message, severity, range);
-        diagnostics.push(diagnostic);
+
+        diagnostics.push(Diagnostic::from_text_range(Self::CODE, message, severity, range));
     }
 }
 

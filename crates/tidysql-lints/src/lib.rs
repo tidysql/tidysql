@@ -43,32 +43,36 @@ impl Diagnostic {
 }
 
 pub(crate) struct LintContext<'a> {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) source: &'a str,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) dialect: DialectKind,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) tree: &'a SyntaxTree,
     pub(crate) config: &'a Config,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) trait NodeLint {
     const CODE: &'static str;
     const MESSAGE: &'static str;
     const SEVERITY: Severity;
     const TARGET: SyntaxKind;
 
+    fn level(config: &Config) -> Severity;
+
     fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>);
 }
 
 pub(crate) trait TokenLint {
     const CODE: &'static str;
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const MESSAGE: &'static str;
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const SEVERITY: Severity;
     fn matches(kind: SyntaxKind) -> bool;
+
+    fn level(config: &Config) -> Severity;
 
     fn check(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>);
 }
@@ -98,11 +102,30 @@ fn run_token_lints(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut
     run_token_lint::<disallow_names::DisallowNames>(ctx, token, diagnostics);
 }
 
+#[expect(dead_code)]
+fn run_node_lint<L: NodeLint>(
+    ctx: &LintContext<'_>,
+    node: &SyntaxNode,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if L::level(ctx.config) == Severity::Allow {
+        return;
+    }
+
+    if node.kind() == L::TARGET {
+        L::check(ctx, node, diagnostics);
+    }
+}
+
 fn run_token_lint<L: TokenLint>(
     ctx: &LintContext<'_>,
     token: &SyntaxToken,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if L::level(ctx.config) == Severity::Allow {
+        return;
+    }
+
     if L::matches(token.kind()) {
         L::check(ctx, token, diagnostics);
     }
