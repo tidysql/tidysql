@@ -1,7 +1,9 @@
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -95,10 +97,24 @@ fn write_output(output: &str) -> io::Result<()> {
 }
 
 fn emit_diagnostics(path: &str, source: &str, diagnostics: &[tidysql::Diagnostic]) {
+    let renderer = if io::stderr().is_terminal() { Renderer::styled() } else { Renderer::plain() };
+
     for diagnostic in diagnostics {
-        let (line, column) = line_column(source, diagnostic.range.start);
-        let severity = severity_label(diagnostic.severity);
-        eprintln!("{path}:{line}:{column}: {severity} {}: {}", diagnostic.code, diagnostic.message);
+        let level = level_for_severity(diagnostic.severity);
+        let range = clamp_range(diagnostic.range.clone(), source.len());
+        let snippet = Snippet::source(source)
+            .line_start(1)
+            .path(path)
+            .annotation(AnnotationKind::Primary.span(range).label(diagnostic.message.as_str()));
+        let mut group =
+            level.primary_title(diagnostic.message.as_str()).id(diagnostic.code).element(snippet);
+
+        if let Some(fix) = &diagnostic.fix {
+            group = group.element(Level::HELP.message(format!("fix: {}", fix.title)));
+        }
+
+        let report = [group];
+        eprintln!("{}", renderer.render(&report));
     }
 }
 
@@ -110,35 +126,19 @@ fn check_diagnostics(diagnostics: &[tidysql::Diagnostic]) -> Result<(), String> 
     if has_failing { Err(String::new()) } else { Ok(()) }
 }
 
-fn severity_label(severity: tidysql::Severity) -> &'static str {
+fn level_for_severity(severity: tidysql::Severity) -> Level<'static> {
     match severity {
-        tidysql::Severity::Error => "error",
-        tidysql::Severity::Warn => "warning",
-        tidysql::Severity::Info => "info",
-        tidysql::Severity::Hint => "hint",
+        tidysql::Severity::Error => Level::ERROR,
+        tidysql::Severity::Warn => Level::WARNING,
+        tidysql::Severity::Info => Level::INFO,
+        tidysql::Severity::Hint => Level::HELP,
     }
 }
 
-fn line_column(source: &str, byte_index: usize) -> (usize, usize) {
-    let target = byte_index.min(source.len());
-    let mut line = 1usize;
-    let mut column = 1usize;
-    let mut offset = 0usize;
+fn clamp_range(range: Range<usize>, source_len: usize) -> Range<usize> {
+    let max = source_len.saturating_add(1);
+    let start = range.start.min(max);
+    let end = range.end.min(max);
 
-    for ch in source.chars() {
-        if offset >= target {
-            break;
-        }
-
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-
-        offset += ch.len_utf8();
-    }
-
-    (line, column)
+    if end < start { start..start } else { start..end }
 }

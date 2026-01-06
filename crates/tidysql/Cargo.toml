@@ -10,3 +10,4 @@ tidysql-lints = { workspace = true }
 tidysql-syntax = { workspace = true }
 tidysql-config = { workspace = true }
 clap = { workspace = true }
+annotate-snippets = { workspace = true }
