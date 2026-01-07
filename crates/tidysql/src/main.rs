@@ -200,7 +200,10 @@ fn check(args: CheckCommand, global_options: GlobalConfigArgs) -> Result<(), Str
 
     if cli.fix {
         let fixed = tidysql::fix_with_config(&input, &config).map_err(|err| err.to_string())?;
-        write_output(&fixed).map_err(|err| err.to_string())?;
+        match cli.path.as_deref() {
+            Some(path) => std::fs::write(path, &fixed).map_err(|err| err.to_string())?,
+            None => write_output(&fixed).map_err(|err| err.to_string())?,
+        }
         let diagnostics = tidysql::check_with_config(&fixed, &config);
         emit_diagnostics(&display_path, &fixed, &diagnostics);
         return check_diagnostics(&diagnostics);
