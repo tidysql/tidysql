@@ -11,5 +11,7 @@ tidysql-syntax = { workspace = true }
 tidysql-config = { workspace = true }
 clap = { workspace = true }
 annotate-snippets = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
 tower-lsp = { workspace = true }
