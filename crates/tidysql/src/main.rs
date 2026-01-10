@@ -6,6 +6,8 @@ use std::process;
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use clap::{Args, Parser, Subcommand};
 
+mod lsp;
+
 #[derive(Parser)]
 #[command(name = "tidysql", version)]
 struct Cli {
@@ -37,6 +39,7 @@ struct ConfigOverrideArgs {
 enum Command {
     Format(FormatCommand),
     Check(CheckCommand),
+    Lsp(LspCommand),
 }
 
 #[derive(Args)]
@@ -55,6 +58,12 @@ struct CheckCommand {
     config_overrides: ConfigOverrideArgs,
     #[arg(long)]
     fix: bool,
+}
+
+#[derive(Args)]
+struct LspCommand {
+    #[command(flatten)]
+    config_overrides: ConfigOverrideArgs,
 }
 
 struct FormatArguments {
@@ -167,6 +176,7 @@ fn main() {
     let result = match Cli::parse() {
         Cli { command: Command::Format(args), global_options } => format(args, global_options),
         Cli { command: Command::Check(args), global_options } => check(args, global_options),
+        Cli { command: Command::Lsp(args), global_options } => serve_lsp(args, global_options),
     };
 
     if let Err(message) = result {
@@ -212,6 +222,12 @@ fn check(args: CheckCommand, global_options: GlobalConfigArgs) -> Result<(), Str
     let diagnostics = tidysql::check_with_config(&input, &config);
     emit_diagnostics(&display_path, &input, &diagnostics);
     check_diagnostics(&diagnostics)
+}
+
+fn serve_lsp(args: LspCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
+    let overrides = ConfigOverrides::from(args.config_overrides);
+    let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
+    lsp::run(config_arguments)
 }
 
 fn read_input(path: Option<&Path>) -> io::Result<String> {

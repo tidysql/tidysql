@@ -20,6 +20,8 @@ smol_str = "0.3"
 clap = { version = "4.5.23", features = ["derive"] }
 annotate-snippets = "0.12.10"
 datatest-stable = "0.3.3"
+tokio = { version = "1", features = ["full"] }
+tower-lsp = "0.20"
 tidysql = { path = "crates/tidysql" }
 tidysql-config = { path = "crates/tidysql-config" }
 tidysql-formatter = { path = "crates/tidysql-formatter" }

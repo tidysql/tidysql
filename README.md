@@ -1,1 +1,1 @@
-# tidysql
+# TidySQL
