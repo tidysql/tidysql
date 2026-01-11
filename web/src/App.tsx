@@ -134,6 +134,12 @@ function App() {
     () => dialectOptions.some((option) => option.id === dialect),
     [dialectOptions, dialect]
   )
+  const sqlDiagnosticsCount = useMemo(
+    () =>
+      diagnostics.filter((diagnostic) => (diagnostic.source ?? 'sql') === 'sql')
+        .length,
+    [diagnostics]
+  )
   const loadingLabel = useMemo(() => {
     if (workspaceStatus === 'loading') {
       return 'Loading parser...'
@@ -289,7 +295,28 @@ function App() {
   }
 
   const handleFixAll = () => {
-    handleFormat()
+    if (!workspaceRef.current) {
+      return
+    }
+
+    const source = editorRef.current?.getValue() ?? sql
+    let fixed = source
+    try {
+      fixed = workspaceRef.current.fix_with_config(
+        source,
+        configRef.current
+      ) as string
+    } catch {
+      runDiagnostics(source)
+      return
+    }
+
+    if (editorRef.current && fixed !== source) {
+      editorRef.current.setValue(fixed)
+      return
+    }
+
+    setSql(fixed)
   }
 
   const formatSource = (source: string) => {
@@ -496,12 +523,12 @@ function App() {
               className="btn-primary"
               type="button"
               onClick={handleFixAll}
-              disabled={!wasmReady || diagnostics.length === 0}
+              disabled={!wasmReady || sqlDiagnosticsCount === 0}
             >
               <span className="material-symbols-outlined" aria-hidden="true">
                 auto_fix
               </span>
-              Fix All ({diagnostics.length})
+              Fix All ({sqlDiagnosticsCount})
             </button>
           </div>
         </div>

@@ -92,6 +92,30 @@ impl Workspace {
         let formatted = tidysql::format_with_config(source, &config);
         Ok(formatted)
     }
+
+    pub fn fix_with_config(&self, source: &str, config_toml: &str) -> Result<String, JsValue> {
+        let config = match tidysql_config::Config::from_toml_str(config_toml) {
+            Ok(config) => config,
+            Err(error) => {
+                let range = config_error_range(&error);
+                let message = config_error_message(&error);
+                let diagnostics = vec![MonacoDiagnostic {
+                    message,
+                    severity: map_severity(tidysql::Severity::Error),
+                    start: utf16_position(config_toml, range.start),
+                    end: utf16_position(config_toml, range.end),
+                    source: "config",
+                }];
+
+                let value = serde_wasm_bindgen::to_value(&diagnostics)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                return Err(value);
+            }
+        };
+
+        tidysql::fix_with_config(source, &config)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
 }
 
 fn map_severity(severity: tidysql::Severity) -> String {
