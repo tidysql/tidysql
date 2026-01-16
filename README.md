@@ -50,7 +50,7 @@ dialect = "ansi"  # ansi, bigquery, clickhouse, databricks, mysql, redshift, sno
 [lints]
 explicit_union = { level = "warn" }
 disallow_names = { level = "warn", names = ["temp"], regexes = ["^_"] }
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 ```
 
 ### Lint Levels
@@ -83,14 +83,14 @@ select 1 from blah
 
 ```toml
 [lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 ```
 
 **Options:**
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `capitalisation_policy` | string | `"consistent"` | One of: `consistent`, `upper`, `lower`, `capitalise`, `pascal`, `snake`, `camel` |
+| `policy` | string | `"consistent"` | One of: `consistent`, `upper`, `lower`, `capitalise`, `pascal`, `snake`, `camel` |
 | `ignore_words` | array | `[]` | Keywords to ignore (case-insensitive) |
 | `ignore_words_regex` | array | `[]` | Regex patterns for keywords to ignore |
 

@@ -259,7 +259,7 @@ pub enum CapitalisationPolicy {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeywordCaseConfig {
-    pub capitalisation_policy: CapitalisationPolicy,
+    pub policy: CapitalisationPolicy,
     pub ignore_words: Vec<String>,
     #[serde(
         deserialize_with = "deserialize_ignore_words_regex",

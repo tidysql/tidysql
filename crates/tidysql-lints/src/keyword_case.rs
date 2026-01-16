@@ -24,7 +24,7 @@ impl TokenLint for KeywordCase {
             return;
         }
 
-        let policy = resolve_policy(options.capitalisation_policy, ctx);
+        let policy = resolve_policy(options.policy, ctx);
         if is_correct_case(text, policy) {
             return;
         }

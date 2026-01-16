@@ -24,12 +24,12 @@ keyword_case = { level = "warn" }
 code = "keyword_case"
 
 [[case]]
-name = "test_fail_capitalisation_policy_lower"
+name = "test_fail_policy_lower"
 sql = "SELECT * FROM MOO ORDER BY dt DESC"
 fixed_sql = "select * from MOO order by dt desc"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "lower" }
+keyword_case = { level = "warn", policy = "lower" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -47,12 +47,12 @@ code = "keyword_case"
 code = "keyword_case"
 
 [[case]]
-name = "test_fail_capitalisation_policy_upper"
+name = "test_fail_policy_upper"
 sql = "select * from MOO order by dt desc"
 fixed_sql = "SELECT * FROM MOO ORDER BY dt DESC"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -70,12 +70,12 @@ code = "keyword_case"
 code = "keyword_case"
 
 [[case]]
-name = "test_fail_capitalisation_policy_capitalise"
+name = "test_fail_policy_capitalise"
 sql = "SELECT * FROM MOO ORDER BY dt DESC"
 fixed_sql = "Select * From MOO Order By dt Desc"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "capitalise" }
+keyword_case = { level = "warn", policy = "capitalise" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -107,25 +107,25 @@ keyword_case = { level = "warn" }
 code = "keyword_case"
 
 [[case]]
-name = "test_fail_date_part_capitalisation_policy_lower"
+name = "test_fail_date_part_policy_lower"
 # Parser only recognizes SELECT as a keyword here
 sql = "SELECT dt + interval 2 day, interval 3 HOUR"
 fixed_sql = "select dt + interval 2 day, interval 3 HOUR"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "lower" }
+keyword_case = { level = "warn", policy = "lower" }
 
 [[case.expect]]
 code = "keyword_case"
 
 [[case]]
-name = "test_fail_date_part_capitalisation_policy_upper"
+name = "test_fail_date_part_policy_upper"
 # Parser recognizes only "interval" as keyword, not "day" or "HOUR"
 sql = "SELECT dt + interval 2 day, interval 3 HOUR"
 fixed_sql = "SELECT dt + INTERVAL 2 day, INTERVAL 3 HOUR"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -148,28 +148,28 @@ sql = "SELECT DATE_ADD(date, INTERVAL 5 YEAR) AS display_date"
 dialect = "bigquery"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case]]
 name = "test_pass_ignore_word"
 sql = "SeleCT 1"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper", ignore_words = ["select"] }
+keyword_case = { level = "warn", policy = "upper", ignore_words = ["select"] }
 
 [[case]]
 name = "test_pass_ignore_words"
 sql = "SeleCT 1"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper", ignore_words = ["select", "from"] }
+keyword_case = { level = "warn", policy = "upper", ignore_words = ["select", "from"] }
 
 [[case]]
 name = "test_pass_ignore_words_regex_simple"
 sql = "SeleCT 1"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["^Se"] }
+keyword_case = { level = "warn", policy = "upper", ignore_words_regex = ["^Se"] }
 
 [[case]]
 name = "test_fail_ignore_words_regex_simple"
@@ -177,7 +177,7 @@ sql = "SeleCT 1 FrOM t_table"
 fixed_sql = "SeleCT 1 FROM t_table"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["^Se"] }
+keyword_case = { level = "warn", policy = "upper", ignore_words_regex = ["^Se"] }
 
 [[case.expect]]
 code = "keyword_case"
@@ -187,7 +187,7 @@ name = "test_pass_ignore_words_complex"
 sql = "SeleCT 1 FrOM t_table"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["(^Se|^Fr)"] }
+keyword_case = { level = "warn", policy = "upper", ignore_words_regex = ["(^Se|^Fr)"] }
 
 [[case]]
 name = "test_fail_snowflake_group_by_cube"
@@ -210,7 +210,7 @@ ORDER BY state, city NULLS LAST
 dialect = "snowflake"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -257,7 +257,7 @@ fixed_sql = "SELECT LAST_DAY(col, WEEK(MONDAY))"
 dialect = "bigquery"
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -290,7 +290,7 @@ FROM foo
 """
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "upper" }
+keyword_case = { level = "warn", policy = "upper" }
 
 [[case]]
 name = "pass_all_lowercase"
@@ -301,14 +301,14 @@ from foo
 """
 
 [case.config.lints]
-keyword_case = { level = "warn", capitalisation_policy = "lower" }
+keyword_case = { level = "warn", policy = "lower" }
 
 [[case]]
 name = "error_level"
 sql = "select a from foo"
 
 [case.config.lints]
-keyword_case = { level = "error", capitalisation_policy = "upper" }
+keyword_case = { level = "error", policy = "upper" }
 
 [[case.expect]]
 code = "keyword_case"
@@ -323,5 +323,5 @@ name = "allow_level"
 sql = "select a FROM foo"
 
 [case.config.lints]
-keyword_case = { level = "allow", capitalisation_policy = "upper" }
+keyword_case = { level = "allow", policy = "upper" }
 
