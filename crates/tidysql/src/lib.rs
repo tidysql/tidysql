@@ -38,7 +38,7 @@ fn check_with_dialect(
     config: &tidysql_config::Config,
 ) -> Vec<Diagnostic> {
     match tidysql_syntax::parse(source, dialect) {
-        Ok(tree) => tidysql_lints::run(source, dialect, &tree, config),
+        Ok(tree) => tidysql_lints::run(dialect, &tree, config),
         Err(error) => diagnostics_from_parse_error(error),
     }
 }
@@ -51,7 +51,7 @@ pub fn format_with_config(source: &str, config: &tidysql_config::Config) -> Stri
 pub fn fix_with_config(source: &str, config: &tidysql_config::Config) -> Result<String, FixError> {
     let dialect = config_dialect(config);
     let tree = tidysql_syntax::parse(source, dialect).map_err(FixError::Parse)?;
-    let diagnostics = tidysql_lints::run(source, dialect, &tree, config);
+    let diagnostics = tidysql_lints::run(dialect, &tree, config);
     let edits = collect_fixes(&diagnostics);
 
     if edits.is_empty() {

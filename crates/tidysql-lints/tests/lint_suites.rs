@@ -52,7 +52,7 @@ fn run_single_case(path: &Path, case_index: usize, case: &LintCase) -> datatest_
     let dialect = config_dialect(&case.config);
     let tree =
         tidysql_syntax::parse(&case.sql, dialect).map_err(|error| format!("{label}: {error}"))?;
-    let diagnostics = tidysql_lints::run(&case.sql, dialect, &tree, &case.config);
+    let diagnostics = tidysql_lints::run(dialect, &tree, &case.config);
 
     if diagnostics.len() != case.expect.len() {
         return Err(format!(

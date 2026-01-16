@@ -125,6 +125,7 @@ pub const DIALECTS: &[Dialect] = &[
 pub enum LintName {
     DisallowNames,
     ExplicitUnion,
+    InconsistentCapitalisation,
 }
 
 impl LintName {
@@ -132,11 +133,13 @@ impl LintName {
         match self {
             LintName::DisallowNames => "disallow_names",
             LintName::ExplicitUnion => "explicit_union",
+            LintName::InconsistentCapitalisation => "inconsistent_capitalisation",
         }
     }
 }
 
-pub const LINTS: &[LintName] = &[LintName::DisallowNames, LintName::ExplicitUnion];
+pub const LINTS: &[LintName] =
+    &[LintName::DisallowNames, LintName::ExplicitUnion, LintName::InconsistentCapitalisation];
 
 #[derive(Debug, Clone)]
 pub struct LintNameParseError {
@@ -240,6 +243,83 @@ struct LintConfigTable<T> {
 #[serde(default, deny_unknown_fields)]
 pub struct ExplicitUnionConfig {}
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CapitalisationPolicy {
+    #[default]
+    Consistent,
+    Upper,
+    Lower,
+    Pascal,
+    Capitalise,
+    Snake,
+    Camel,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct InconsistentCapitalisationConfig {
+    pub capitalisation_policy: CapitalisationPolicy,
+    pub ignore_words: Vec<String>,
+    #[serde(
+        deserialize_with = "deserialize_ignore_words_regex",
+        serialize_with = "serialize_ignore_words_regex",
+        default
+    )]
+    pub ignore_words_regex: Vec<Regex>,
+}
+
+fn deserialize_ignore_words_regex<'de, D>(deserializer: D) -> Result<Vec<Regex>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct RegexesVisitor;
+
+    impl<'de> Visitor<'de> for RegexesVisitor {
+        type Value = Vec<Regex>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a list of regex patterns")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut compiled = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            let mut index = 0;
+
+            while let Some(pattern) = seq.next_element::<Cow<'de, str>>()? {
+                match Regex::new(pattern.as_ref()) {
+                    Ok(regex) => compiled.push(regex),
+                    Err(error) => {
+                        return Err(DeError::custom(format!(
+                            "invalid lints.inconsistent_capitalisation.\
+                             ignore_words_regex[{index}] (`{pattern}`): {error}"
+                        )));
+                    }
+                }
+                index += 1;
+            }
+
+            Ok(compiled)
+        }
+    }
+
+    deserializer.deserialize_seq(RegexesVisitor)
+}
+
+fn serialize_ignore_words_regex<S>(regexes: &[Regex], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut seq = serializer.serialize_seq(Some(regexes.len()))?;
+    for regex in regexes {
+        seq.serialize_element(regex.as_str())?;
+    }
+    seq.end()
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DisallowNamesConfig {
     pub names: Vec<String>,
@@ -324,11 +404,25 @@ where
     seq.end()
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Lints {
     pub disallow_names: LintConfig<DisallowNamesConfig>,
     pub explicit_union: LintConfig<ExplicitUnionConfig>,
+    pub inconsistent_capitalisation: LintConfig<InconsistentCapitalisationConfig>,
+}
+
+impl Default for Lints {
+    fn default() -> Self {
+        Self {
+            disallow_names: LintConfig::default(),
+            explicit_union: LintConfig::default(),
+            inconsistent_capitalisation: LintConfig {
+                level: Severity::Allow,
+                options: InconsistentCapitalisationConfig::default(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

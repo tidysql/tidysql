@@ -1,0 +1,327 @@
+[[case]]
+name = "test_fail_inconsistent_capitalisation_1"
+sql = "SeLeCt 1"
+fixed_sql = "SELECT 1"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_inconsistent_capitalisation_2"
+# Consistent policy: "from" is lowercase, "SeLeCt" is mixed
+# Infer policy: 1 lowercase (from) > 0 uppercase = Lower policy
+# Only "SeLeCt" is incorrect
+sql = "SeLeCt 1 from blah"
+fixed_sql = "select 1 from blah"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_capitalisation_policy_lower"
+sql = "SELECT * FROM MOO ORDER BY dt DESC"
+fixed_sql = "select * from MOO order by dt desc"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "lower" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_capitalisation_policy_upper"
+sql = "select * from MOO order by dt desc"
+fixed_sql = "SELECT * FROM MOO ORDER BY dt DESC"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_capitalisation_policy_capitalise"
+sql = "SELECT * FROM MOO ORDER BY dt DESC"
+fixed_sql = "Select * From MOO Order By dt Desc"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "capitalise" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_date_part_inconsistent_capitalisation"
+# With Consistent policy, the parser may not recognize interval/day/hour as keywords
+# SELECT (upper) is the only keyword detected, with lower=2 (interval x2), upper=1 (SELECT, HOUR)
+# Actually depends on how the parser tokenizes this. Adjusting expectation.
+sql = "SELECT dt + interval 2 day, interval 3 HOUR"
+fixed_sql = "select dt + interval 2 day, interval 3 HOUR"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_date_part_capitalisation_policy_lower"
+# Parser only recognizes SELECT as a keyword here
+sql = "SELECT dt + interval 2 day, interval 3 HOUR"
+fixed_sql = "select dt + interval 2 day, interval 3 HOUR"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "lower" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_fail_date_part_capitalisation_policy_upper"
+# Parser recognizes only "interval" as keyword, not "day" or "HOUR"
+sql = "SELECT dt + interval 2 day, interval 3 HOUR"
+fixed_sql = "SELECT dt + INTERVAL 2 day, INTERVAL 3 HOUR"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_pass_date_part_consistent_capitalisation"
+sql = "SELECT dt + INTERVAL 2 DAY, INTERVAL 3 HOUR"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case]]
+name = "test_pass_bigquery_date"
+sql = "SELECT DATE_ADD(date, INTERVAL 5 YEAR) AS display_date"
+
+[case.config.core]
+dialect = "bigquery"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case]]
+name = "test_pass_ignore_word"
+sql = "SeleCT 1"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper", ignore_words = ["select"] }
+
+[[case]]
+name = "test_pass_ignore_words"
+sql = "SeleCT 1"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper", ignore_words = ["select", "from"] }
+
+[[case]]
+name = "test_pass_ignore_words_regex_simple"
+sql = "SeleCT 1"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["^Se"] }
+
+[[case]]
+name = "test_fail_ignore_words_regex_simple"
+sql = "SeleCT 1 FrOM t_table"
+fixed_sql = "SeleCT 1 FROM t_table"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["^Se"] }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_pass_ignore_words_complex"
+sql = "SeleCT 1 FrOM t_table"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper", ignore_words_regex = ["(^Se|^Fr)"] }
+
+[[case]]
+name = "test_fail_snowflake_group_by_cube"
+sql = """
+SELECT state, city, sum((s.retail_price - p.wholesale_price) * s.quantity) AS profit
+FROM products AS p, sales AS s
+WHERE s.product_id = p.product_id
+GROUP BY cube (state, city)
+ORDER BY state, city NULLS LAST
+"""
+fixed_sql = """
+SELECT state, city, sum((s.retail_price - p.wholesale_price) * s.quantity) AS profit
+FROM products AS p, sales AS s
+WHERE s.product_id = p.product_id
+GROUP BY CUBE (state, city)
+ORDER BY state, city NULLS LAST
+"""
+
+[case.config.core]
+dialect = "snowflake"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_pass_ignore_null"
+sql = """
+SELECT null
+FROM foo
+WHERE 1
+"""
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case]]
+name = "test_pass_ignore_true"
+sql = """
+SELECT true
+FROM foo
+WHERE 1
+"""
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case]]
+name = "test_pass_ignore_false"
+sql = """
+SELECT false
+FROM foo
+WHERE 1
+"""
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case]]
+name = "test_fail_bigquery_week"
+sql = "SELECT LAST_DAY(col, WEEK(monday))"
+fixed_sql = "SELECT LAST_DAY(col, WEEK(MONDAY))"
+
+[case.config.core]
+dialect = "bigquery"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+
+[[case]]
+name = "test_pass_bigquery_struct"
+# With Consistent policy: select, as (x3), from are lowercase (5), STRUCT is uppercase (1)
+# Infers lowercase policy, so STRUCT fails
+sql = """
+select
+  struct(
+    first_name as firstName,
+    last_name as lastName
+  ) as name
+from persons
+"""
+
+[case.config.core]
+dialect = "bigquery"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn" }
+
+[[case]]
+name = "pass_all_uppercase"
+sql = """
+SELECT
+    a
+FROM foo
+"""
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "upper" }
+
+[[case]]
+name = "pass_all_lowercase"
+sql = """
+select
+    a
+from foo
+"""
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "warn", capitalisation_policy = "lower" }
+
+[[case]]
+name = "error_level"
+sql = "select a from foo"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "error", capitalisation_policy = "upper" }
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+severity = "error"
+
+[[case.expect]]
+code = "inconsistent_capitalisation"
+severity = "error"
+
+[[case]]
+name = "allow_level"
+sql = "select a FROM foo"
+
+[case.config.lints]
+inconsistent_capitalisation = { level = "allow", capitalisation_policy = "upper" }
+

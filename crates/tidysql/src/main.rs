@@ -138,6 +138,9 @@ fn apply_lint_level(
         tidysql_config::LintName::ExplicitUnion => {
             config.lints.explicit_union.level = level;
         }
+        tidysql_config::LintName::InconsistentCapitalisation => {
+            config.lints.inconsistent_capitalisation.level = level;
+        }
     }
 }
 

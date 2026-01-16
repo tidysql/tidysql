@@ -6,8 +6,6 @@ pub(crate) struct DisallowNames;
 
 impl TokenLint for DisallowNames {
     const CODE: &'static str = "disallow_names";
-    const MESSAGE: &'static str = "Disallowed name.";
-    const SEVERITY: Severity = Severity::Warn;
 
     fn matches(kind: SyntaxKind) -> bool {
         !matches!(kind, SyntaxKind::Comment | SyntaxKind::InlineComment | SyntaxKind::BlockComment)
@@ -18,46 +16,31 @@ impl TokenLint for DisallowNames {
     }
 
     fn check(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
-        if ctx.config.lints.disallow_names.options.names.is_empty()
-            && ctx.config.lints.disallow_names.options.regexes.is_empty()
-        {
+        let lint = &ctx.config.lints.disallow_names;
+        let options = &lint.options;
+
+        if options.names.is_empty() && options.regexes.is_empty() {
             return;
         }
 
-        let raw = token.text();
-        let candidate = strip_identifier_quotes(raw);
-
+        let candidate = strip_identifier_quotes(token.text());
         if candidate.is_empty() {
             return;
         }
 
-        let name_match = ctx
-            .config
-            .lints
-            .disallow_names
-            .options
-            .names
-            .iter()
-            .any(|word| word.eq_ignore_ascii_case(candidate));
+        let is_disallowed = options.names.iter().any(|w| w.eq_ignore_ascii_case(candidate))
+            || options.regexes.iter().any(|r| r.is_match(candidate));
 
-        let regex_match = ctx
-            .config
-            .lints
-            .disallow_names
-            .options
-            .regexes
-            .iter()
-            .any(|regex| regex.is_match(candidate));
-
-        if !name_match && !regex_match {
+        if !is_disallowed {
             return;
         }
 
-        let range = token.text_range();
-        let message = format!("Disallowed name: {candidate}.");
-        let severity = ctx.config.lints.disallow_names.level;
-
-        diagnostics.push(Diagnostic::from_text_range(Self::CODE, message, severity, range));
+        diagnostics.push(Diagnostic::from_text_range(
+            Self::CODE,
+            format!("Disallowed name: {candidate}."),
+            lint.level,
+            token.text_range(),
+        ));
     }
 }
 

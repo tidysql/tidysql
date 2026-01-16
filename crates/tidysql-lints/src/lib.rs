@@ -8,6 +8,7 @@ use tidysql_syntax::{
 
 mod disallow_names;
 mod explicit_union;
+mod inconsistent_capitalisation;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -44,10 +45,7 @@ impl Diagnostic {
 }
 
 pub(crate) struct LintContext<'a> {
-    #[expect(dead_code)]
-    pub(crate) source: &'a str,
     pub(crate) dialect: DialectKind,
-    #[expect(dead_code)]
     pub(crate) tree: &'a SyntaxTree,
     pub(crate) config: &'a Config,
 }
@@ -66,24 +64,14 @@ pub(crate) trait NodeLint {
 
 pub(crate) trait TokenLint {
     const CODE: &'static str;
-    #[expect(dead_code)]
-    const MESSAGE: &'static str;
-    #[expect(dead_code)]
-    const SEVERITY: Severity;
+
     fn matches(kind: SyntaxKind) -> bool;
-
     fn level(config: &Config) -> Severity;
-
     fn check(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>);
 }
 
-pub fn run<'a>(
-    source: &'a str,
-    dialect: DialectKind,
-    tree: &'a SyntaxTree,
-    config: &'a Config,
-) -> Vec<Diagnostic> {
-    let ctx = LintContext { source, dialect, tree, config };
+pub fn run(dialect: DialectKind, tree: &SyntaxTree, config: &Config) -> Vec<Diagnostic> {
+    let ctx = LintContext { dialect, tree, config };
     let mut diagnostics = Vec::new();
 
     for element in tree.root().descendants_with_tokens() {
@@ -102,6 +90,11 @@ fn run_node_lints(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Ve
 
 fn run_token_lints(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
     run_token_lint::<disallow_names::DisallowNames>(ctx, token, diagnostics);
+    run_token_lint::<inconsistent_capitalisation::InconsistentCapitalisation>(
+        ctx,
+        token,
+        diagnostics,
+    );
 }
 
 fn run_node_lint<L: NodeLint>(
@@ -133,7 +126,5 @@ fn run_token_lint<L: TokenLint>(
 }
 
 fn text_range_to_range(range: TextRange) -> Range<usize> {
-    let start = usize::from(range.start());
-    let end = usize::from(range.end());
-    start..end
+    range.start().into()..range.end().into()
 }
