@@ -8,7 +8,7 @@ use tidysql_syntax::{
 
 mod disallow_names;
 mod explicit_union;
-mod inconsistent_capitalisation;
+mod keyword_case;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -90,11 +90,7 @@ fn run_node_lints(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Ve
 
 fn run_token_lints(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
     run_token_lint::<disallow_names::DisallowNames>(ctx, token, diagnostics);
-    run_token_lint::<inconsistent_capitalisation::InconsistentCapitalisation>(
-        ctx,
-        token,
-        diagnostics,
-    );
+    run_token_lint::<keyword_case::KeywordCase>(ctx, token, diagnostics);
 }
 
 fn run_node_lint<L: NodeLint>(

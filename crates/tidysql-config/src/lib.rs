@@ -125,7 +125,7 @@ pub const DIALECTS: &[Dialect] = &[
 pub enum LintName {
     DisallowNames,
     ExplicitUnion,
-    InconsistentCapitalisation,
+    KeywordCase,
 }
 
 impl LintName {
@@ -133,13 +133,13 @@ impl LintName {
         match self {
             LintName::DisallowNames => "disallow_names",
             LintName::ExplicitUnion => "explicit_union",
-            LintName::InconsistentCapitalisation => "inconsistent_capitalisation",
+            LintName::KeywordCase => "keyword_case",
         }
     }
 }
 
 pub const LINTS: &[LintName] =
-    &[LintName::DisallowNames, LintName::ExplicitUnion, LintName::InconsistentCapitalisation];
+    &[LintName::DisallowNames, LintName::ExplicitUnion, LintName::KeywordCase];
 
 #[derive(Debug, Clone)]
 pub struct LintNameParseError {
@@ -258,7 +258,7 @@ pub enum CapitalisationPolicy {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct InconsistentCapitalisationConfig {
+pub struct KeywordCaseConfig {
     pub capitalisation_policy: CapitalisationPolicy,
     pub ignore_words: Vec<String>,
     #[serde(
@@ -294,8 +294,8 @@ where
                     Ok(regex) => compiled.push(regex),
                     Err(error) => {
                         return Err(DeError::custom(format!(
-                            "invalid lints.inconsistent_capitalisation.\
-                             ignore_words_regex[{index}] (`{pattern}`): {error}"
+                            "invalid lints.keyword_case.ignore_words_regex[{index}] \
+                             (`{pattern}`): {error}"
                         )));
                     }
                 }
@@ -409,7 +409,7 @@ where
 pub struct Lints {
     pub disallow_names: LintConfig<DisallowNamesConfig>,
     pub explicit_union: LintConfig<ExplicitUnionConfig>,
-    pub inconsistent_capitalisation: LintConfig<InconsistentCapitalisationConfig>,
+    pub keyword_case: LintConfig<KeywordCaseConfig>,
 }
 
 impl Default for Lints {
@@ -417,9 +417,9 @@ impl Default for Lints {
         Self {
             disallow_names: LintConfig::default(),
             explicit_union: LintConfig::default(),
-            inconsistent_capitalisation: LintConfig {
+            keyword_case: LintConfig {
                 level: Severity::Allow,
-                options: InconsistentCapitalisationConfig::default(),
+                options: KeywordCaseConfig::default(),
             },
         }
     }
