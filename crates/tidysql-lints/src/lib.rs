@@ -9,6 +9,7 @@ use tidysql_syntax::{
 mod disallow_names;
 mod explicit_union;
 mod keyword_case;
+pub mod metadata;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {

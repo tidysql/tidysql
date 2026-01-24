@@ -2,7 +2,17 @@
 
 A SQL linter and formatter with auto-fix support.
 
+## Install
+
+Build from source:
+
+```bash
+cargo install --path crates/tidysql
+```
+
 ## Usage
+
+TidySQL reads from files or stdin and can auto-fix issues.
 
 ### Check (Lint)
 
@@ -41,11 +51,12 @@ tidysql lsp
 
 ## Configuration
 
-Create a `tidysql.toml` file:
+TidySQL looks for `tidysql.toml` in the current directory or any parent directory.
+Create one in your project to configure defaults:
 
 ```toml
 [core]
-dialect = "ansi"  # ansi, bigquery, clickhouse, databricks, mysql, redshift, snowflake, trino
+dialect = "ansi"  # ansi, athena, bigquery, clickhouse, databricks, duckdb, mysql, postgres, redshift, snowflake, sparksql, sqlite, trino, tsql
 
 [lints]
 explicit_union = { level = "warn" }
@@ -58,78 +69,15 @@ keyword_case = { level = "warn", policy = "upper" }
 - `allow` - Disable the lint
 - `warn` - Report as warning
 - `error` / `deny` - Report as error
+- `info` - Report as info
+- `hint` - Report as hint
 
-## Lint Rules
+## Documentation
 
-### `keyword_case`
+Lint rule documentation:
 
-Enforces consistent capitalisation of SQL keywords.
-
-**Anti-pattern:**
-
-```sql
-SeLeCt 1 from blah
-```
-
-**Best practice:**
-
-```sql
-SELECT 1 FROM blah
--- or
-select 1 from blah
-```
-
-**Configuration:**
-
-```toml
-[lints]
-keyword_case = { level = "warn", policy = "upper" }
-```
-
-**Options:**
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `policy` | string | `"consistent"` | One of: `consistent`, `upper`, `lower`, `capitalise`, `pascal`, `snake`, `camel` |
-| `ignore_words` | array | `[]` | Keywords to ignore (case-insensitive) |
-| `ignore_words_regex` | array | `[]` | Regex patterns for keywords to ignore |
-
-**Policies:**
-
-- `consistent` - Infer from existing keywords (uppercase if majority are upper, otherwise lowercase)
-- `upper` - `SELECT`, `FROM`, `WHERE`
-- `lower` - `select`, `from`, `where`
-- `capitalise` / `pascal` - `Select`, `From`, `Where`
-- `snake` / `camel` - Same as `lower`
-
-### `explicit_union`
-
-Requires `UNION` statements to explicitly specify `ALL` or `DISTINCT`.
-
-**Anti-pattern:**
-
-```sql
-SELECT 1 UNION SELECT 2
-```
-
-**Best practice:**
-
-```sql
-SELECT 1 UNION DISTINCT SELECT 2
--- or
-SELECT 1 UNION ALL SELECT 2
-```
-
-### `disallow_names`
-
-Disallows specific identifier names.
-
-**Configuration:**
-
-```toml
-[lints]
-disallow_names = { level = "warn", names = ["temp", "tmp"], regexes = ["^_"] }
-```
+- `docs/reference/lints/index.md` (overview)
+- `docs/reference/lints/*.md` (per‑lint details)
 
 ## License
 
