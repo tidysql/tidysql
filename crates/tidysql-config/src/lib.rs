@@ -184,6 +184,7 @@ pub struct Core {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    #[serde(alias = "deny")]
     Error,
     #[default]
     Warn,
@@ -500,4 +501,33 @@ pub fn find_config_path(path: &Path) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_deny_alias() {
+        let config: Config = toml::from_str(
+            r#"
+[lints]
+disallow_names = { level = "deny", names = ["foo"] }
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.lints.disallow_names.level, Severity::Error);
+    }
+
+    #[test]
+    fn severity_error_roundtrip() {
+        let config: Config = toml::from_str(
+            r#"
+[lints]
+disallow_names = { level = "error", names = ["bar"] }
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.lints.disallow_names.level, Severity::Error);
+    }
 }

@@ -62,12 +62,20 @@ fn is_ignored(text: &str, options: &tidysql_config::KeywordCaseConfig) -> bool {
 
 fn resolve_policy(policy: CapitalisationPolicy, ctx: &LintContext<'_>) -> CapitalisationPolicy {
     match policy {
-        CapitalisationPolicy::Consistent => infer_policy(ctx),
+        CapitalisationPolicy::Consistent => {
+            if let Some(cached) = ctx.inferred_keyword_policy.get() {
+                return cached;
+            }
+            let inferred = infer_policy(ctx);
+            ctx.inferred_keyword_policy.set(Some(inferred));
+            inferred
+        }
         other => other,
     }
 }
 
 fn infer_policy(ctx: &LintContext<'_>) -> CapitalisationPolicy {
+    let options = &ctx.config.lints.keyword_case.options;
     let (upper, lower) = ctx
         .tree
         .root()
@@ -76,6 +84,7 @@ fn infer_policy(ctx: &LintContext<'_>) -> CapitalisationPolicy {
             SyntaxElement::Token(t) if t.kind() == SyntaxKind::Keyword => Some(t),
             _ => None,
         })
+        .filter(|token| !is_ignored(token.text(), options))
         .fold((0usize, 0usize), |(upper, lower), token| {
             let text = token.text();
             if is_all_upper(text) {

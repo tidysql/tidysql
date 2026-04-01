@@ -89,7 +89,8 @@ impl Workspace {
             }
         };
 
-        let formatted = tidysql::format_with_config(source, &config);
+        let formatted = tidysql::format_with_config(source, &config)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
         Ok(formatted)
     }
 
@@ -159,7 +160,7 @@ fn utf16_position(source: &str, byte_index: usize) -> MonacoPosition {
         if ch == '\n' {
             line += 1;
             column = 1;
-        } else {
+        } else if ch != '\r' {
             column += ch.len_utf16() as u32;
         }
 
@@ -182,5 +183,37 @@ fn config_error_message(error: &tidysql_config::ConfigError) -> String {
             format!("Config error: {}", source.message())
         }
         _ => format!("Config error: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_position_crlf() {
+        // "AB\r\nCD" — position of 'C' (byte index 4)
+        let source = "AB\r\nCD";
+        let pos = utf16_position(source, 4);
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.column, 1);
+    }
+
+    #[test]
+    fn utf16_position_crlf_mid_line() {
+        // "AB\r\nCD" — position of 'D' (byte index 5)
+        let source = "AB\r\nCD";
+        let pos = utf16_position(source, 5);
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.column, 2);
+    }
+
+    #[test]
+    fn utf16_position_cr_does_not_add_column() {
+        // At position right after 'B' and before '\r' (byte index 2)
+        let source = "AB\r\nCD";
+        let pos = utf16_position(source, 2);
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.column, 3);
     }
 }

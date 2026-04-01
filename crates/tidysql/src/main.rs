@@ -196,7 +196,7 @@ fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), S
     let source_path = cli.path.as_deref().unwrap_or_else(|| Path::new("."));
     let config = config_arguments.load_config(source_path)?;
 
-    let formatted = tidysql::format_with_config(&input, &config);
+    let formatted = tidysql::format_with_config(&input, &config).map_err(|err| err.to_string())?;
     write_output(&formatted).map_err(|err| err.to_string())
 }
 
@@ -214,7 +214,7 @@ fn check(args: CheckCommand, global_options: GlobalConfigArgs) -> Result<(), Str
     if cli.fix {
         let fixed = tidysql::fix_with_config(&input, &config).map_err(|err| err.to_string())?;
         match cli.path.as_deref() {
-            Some(path) => std::fs::write(path, &fixed).map_err(|err| err.to_string())?,
+            Some(path) => atomic_write(path, &fixed).map_err(|err| err.to_string())?,
             None => write_output(&fixed).map_err(|err| err.to_string())?,
         }
         let diagnostics = tidysql::check_with_config(&fixed, &config);
@@ -237,6 +237,12 @@ fn read_input(path: Option<&Path>) -> io::Result<String> {
     match path {
         Some(path) => std::fs::read_to_string(path),
         None => {
+            if io::stdin().is_terminal() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "no input: pass a file path or pipe input via stdin",
+                ));
+            }
             let mut input = String::new();
             io::stdin().read_to_string(&mut input)?;
             Ok(input)
@@ -247,6 +253,14 @@ fn read_input(path: Option<&Path>) -> io::Result<String> {
 fn write_output(output: &str) -> io::Result<()> {
     let mut stdout = io::stdout();
     stdout.write_all(output.as_bytes())?;
+    Ok(())
+}
+
+fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    io::Write::write_all(&mut tmp, content.as_bytes())?;
+    tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -277,7 +291,11 @@ fn check_diagnostics(diagnostics: &[tidysql::Diagnostic]) -> Result<(), String> 
         matches!(diagnostic.severity, tidysql::Severity::Error | tidysql::Severity::Warn)
     });
 
-    if has_failing { Err(String::new()) } else { Ok(()) }
+    if has_failing {
+        Err("lint check failed: diagnostics with error or warning severity found".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn level_for_severity(severity: tidysql::Severity) -> Level<'static> {

@@ -1,7 +1,8 @@
+use std::cell::Cell;
 use std::ops::Range;
 
-use tidysql_config::Config;
 pub use tidysql_config::Severity;
+use tidysql_config::{CapitalisationPolicy, Config};
 use tidysql_syntax::{
     DialectKind, Fix, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, SyntaxTree, TextRange,
 };
@@ -49,6 +50,7 @@ pub(crate) struct LintContext<'a> {
     pub(crate) dialect: DialectKind,
     pub(crate) tree: &'a SyntaxTree,
     pub(crate) config: &'a Config,
+    pub(crate) inferred_keyword_policy: Cell<Option<CapitalisationPolicy>>,
 }
 
 #[expect(dead_code)]
@@ -72,7 +74,7 @@ pub(crate) trait TokenLint {
 }
 
 pub fn run(dialect: DialectKind, tree: &SyntaxTree, config: &Config) -> Vec<Diagnostic> {
-    let ctx = LintContext { dialect, tree, config };
+    let ctx = LintContext { dialect, tree, config, inferred_keyword_policy: Cell::new(None) };
     let mut diagnostics = Vec::new();
 
     for element in tree.root().descendants_with_tokens() {

@@ -40,3 +40,43 @@ sql = "-- foo\nselect bar"
 
 [case.config.lints]
 disallow_names = { names = ["foo"] }
+
+[[case]]
+name = "skip-keywords"
+sql = "SELECT foo FROM bar WHERE 1 = 1"
+
+[case.config.lints]
+disallow_names = { names = ["select", "from", "where"] }
+
+[[case]]
+name = "skip-numeric-literals"
+sql = "SELECT foo FROM bar WHERE x = 42"
+
+[case.config.lints]
+disallow_names = { names = ["42"] }
+
+[[case]]
+name = "skip-string-literals"
+sql = "SELECT foo FROM bar WHERE x = 'all'"
+
+[case.config.lints]
+disallow_names = { names = ["all"] }
+
+[[case]]
+name = "union-all-not-flagged"
+sql = "SELECT a FROM t1 UNION ALL SELECT b FROM t2"
+
+[case.config.lints]
+disallow_names = { names = ["all"] }
+
+[[case]]
+name = "deny-severity-alias"
+sql = "select foo from bar"
+
+[case.config.lints]
+disallow_names = { level = "deny", names = ["foo"] }
+
+[[case.expect]]
+code = "disallow_names"
+message = "Disallowed name: foo."
+severity = "error"

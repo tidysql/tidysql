@@ -20,7 +20,7 @@ impl fmt::Display for FixError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FixError::Parse(error) => write!(f, "{error}"),
-            FixError::Apply(error) => write!(f, "failed to apply fixes: {error:?}"),
+            FixError::Apply(error) => write!(f, "failed to apply fixes: {error}"),
         }
     }
 }
@@ -43,7 +43,10 @@ fn check_with_dialect(
     }
 }
 
-pub fn format_with_config(source: &str, config: &tidysql_config::Config) -> String {
+pub fn format_with_config(
+    source: &str,
+    config: &tidysql_config::Config,
+) -> Result<String, tidysql_formatter::FormatError> {
     let dialect = config_dialect(config);
     tidysql_formatter::format_with_dialect(source, dialect)
 }
@@ -115,7 +118,7 @@ fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
     }
 }
 
-fn config_dialect(config: &tidysql_config::Config) -> DialectKind {
+pub fn config_dialect(config: &tidysql_config::Config) -> DialectKind {
     match config.core.dialect {
         Dialect::Ansi => DialectKind::Ansi,
         Dialect::Athena => DialectKind::Athena,

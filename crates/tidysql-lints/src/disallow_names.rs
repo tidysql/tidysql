@@ -8,7 +8,23 @@ impl TokenLint for DisallowNames {
     const CODE: &'static str = "disallow_names";
 
     fn matches(kind: SyntaxKind) -> bool {
-        !matches!(kind, SyntaxKind::Comment | SyntaxKind::InlineComment | SyntaxKind::BlockComment)
+        matches!(
+            kind,
+            SyntaxKind::NakedIdentifier
+                | SyntaxKind::Identifier
+                | SyntaxKind::QuotedIdentifier
+                | SyntaxKind::NakedIdentifierAll
+                | SyntaxKind::FunctionNameIdentifier
+                | SyntaxKind::PropertyNameIdentifier
+                | SyntaxKind::PropertiesNakedIdentifier
+                | SyntaxKind::DataTypeIdentifier
+                | SyntaxKind::DatetimeTypeIdentifier
+                | SyntaxKind::WildcardIdentifier
+                | SyntaxKind::WidgetNameIdentifier
+                | SyntaxKind::VersionIdentifier
+                | SyntaxKind::ProcedureNameIdentifier
+                | SyntaxKind::ColumnIndexIdentifierSegment
+        )
     }
 
     fn level(config: &tidysql_config::Config) -> Severity {

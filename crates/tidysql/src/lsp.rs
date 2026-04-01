@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentFormattingParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    NumberOrString, OneOf, Position, Range as LspRange, ServerCapabilities, ServerInfo,
+    NumberOrString, Position, Range as LspRange, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -36,7 +36,7 @@ async fn run_async(config: ConfigArguments) -> std::result::Result<(), String> {
 
 struct Backend {
     client: Client,
-    documents: RwLock<HashMap<Url, String>>,
+    documents: RwLock<HashMap<Url, (String, i32)>>,
     config: Arc<ConfigArguments>,
 }
 
@@ -45,35 +45,44 @@ impl Backend {
         Self { client, documents: RwLock::new(HashMap::new()), config: Arc::new(config) }
     }
 
-    async fn publish_diagnostics(&self, uri: Url, text: &str) {
-        let config = self.load_config(&uri).await;
+    async fn publish_diagnostics(&self, uri: Url, text: &str, version: i32) {
+        let config = match self.load_config(&uri).await {
+            Ok(config) => config,
+            Err(message) => {
+                let diagnostic = LspDiagnostic {
+                    range: LspRange { start: Position::new(0, 0), end: Position::new(0, 0) },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: Some(NumberOrString::String("config_error".to_string())),
+                    source: Some("tidysql".to_string()),
+                    message,
+                    ..Default::default()
+                };
+                self.client.publish_diagnostics(uri, vec![diagnostic], Some(version)).await;
+                return;
+            }
+        };
         let diagnostics = tidysql::check_with_config(text, &config);
         let lsp_diagnostics = diagnostics
             .iter()
             .filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text))
             .collect();
-        self.client.publish_diagnostics(uri, lsp_diagnostics, None).await;
+        self.client.publish_diagnostics(uri, lsp_diagnostics, Some(version)).await;
     }
 
-    async fn load_config(&self, uri: &Url) -> tidysql_config::Config {
+    async fn load_config(&self, uri: &Url) -> std::result::Result<tidysql_config::Config, String> {
         let source_path = uri.to_file_path().ok();
         let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
-        match self.config.load_config(source_path) {
-            Ok(config) => config,
-            Err(message) => {
-                self.client.log_message(MessageType::ERROR, message).await;
-                tidysql_config::Config::default()
-            }
-        }
+        self.config.load_config(source_path)
     }
 
-    async fn load_text(&self, uri: &Url) -> Option<String> {
-        if let Some(text) = self.documents.read().await.get(uri).cloned() {
-            return Some(text);
+    async fn load_text(&self, uri: &Url) -> Option<(String, i32)> {
+        if let Some(entry) = self.documents.read().await.get(uri).cloned() {
+            return Some(entry);
         }
 
         let path = uri.to_file_path().ok()?;
-        std::fs::read_to_string(path).ok()
+        let text = std::fs::read_to_string(path).ok()?;
+        Some((text, 0))
     }
 }
 
@@ -89,7 +98,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                document_formatting_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: None,
                 ..Default::default()
             },
         })
@@ -105,31 +114,33 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
+        let version = params.text_document.version;
         let text = params.text_document.text;
-        self.documents.write().await.insert(uri.clone(), text.clone());
-        self.publish_diagnostics(uri, &text).await;
+        self.documents.write().await.insert(uri.clone(), (text.clone(), version));
+        self.publish_diagnostics(uri, &text, version).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        let version = params.text_document.version;
         let text = match params.content_changes.into_iter().last() {
             Some(change) => change.text,
             None => return,
         };
-        self.documents.write().await.insert(uri.clone(), text.clone());
-        self.publish_diagnostics(uri, &text).await;
+        self.documents.write().await.insert(uri.clone(), (text.clone(), version));
+        self.publish_diagnostics(uri, &text, version).await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = match params.text {
-            Some(text) => Some(text),
+            Some(text) => Some((text, 0i32)),
             None => self.load_text(&uri).await,
         };
 
-        if let Some(text) = text {
-            self.documents.write().await.insert(uri.clone(), text.clone());
-            self.publish_diagnostics(uri, &text).await;
+        if let Some((text, version)) = text {
+            self.documents.write().await.insert(uri.clone(), (text.clone(), version));
+            self.publish_diagnostics(uri, &text, version).await;
         }
     }
 
@@ -141,13 +152,19 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
-        let text = match self.load_text(&uri).await {
-            Some(text) => text,
+        let (text, _version) = match self.load_text(&uri).await {
+            Some(entry) => entry,
             None => return Ok(None),
         };
 
-        let config = self.load_config(&uri).await;
-        let formatted = tidysql::format_with_config(&text, &config);
+        let config = match self.load_config(&uri).await {
+            Ok(config) => config,
+            Err(_) => return Ok(None),
+        };
+        let formatted = match tidysql::format_with_config(&text, &config) {
+            Ok(formatted) => formatted,
+            Err(_) => return Ok(None),
+        };
         let range = full_document_range(&text);
         Ok(Some(vec![TextEdit { range, new_text: formatted }]))
     }

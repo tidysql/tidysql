@@ -22,13 +22,8 @@ impl NodeLint for ExplicitUnion {
         }
 
         let Some(union_token) = union_token(node) else { return };
-        let upper = node.text().to_ascii_uppercase();
 
-        if !upper.contains("UNION") {
-            return;
-        }
-
-        if upper.contains("ALL") || upper.contains("DISTINCT") {
+        if union_modifier(node).is_some() {
             return;
         }
 
@@ -69,6 +64,31 @@ fn union_token(node: &SyntaxNode) -> Option<SyntaxToken> {
             SyntaxElement::Node(_) => None,
         })
         .find(|token| token.text().eq_ignore_ascii_case("union"))
+}
+
+fn union_modifier(node: &SyntaxNode) -> Option<SyntaxToken> {
+    let mut seen_union = false;
+
+    for child in node.children_with_tokens() {
+        let SyntaxElement::Token(token) = child else { continue };
+
+        if !seen_union {
+            if token.text().eq_ignore_ascii_case("union") {
+                seen_union = true;
+            }
+            continue;
+        }
+
+        if token.text().eq_ignore_ascii_case("all") || token.text().eq_ignore_ascii_case("distinct")
+        {
+            return Some(token);
+        }
+
+        // Any other non-trivia token after UNION means the modifier is absent.
+        return None;
+    }
+
+    None
 }
 
 fn build_fix(union_token: &SyntaxToken) -> Option<Fix> {
