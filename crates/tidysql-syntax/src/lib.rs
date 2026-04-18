@@ -302,6 +302,11 @@ impl Node {
         tree: &TreeInner,
         offset: TextSize,
     ) -> TokenAtOffset<TokenId> {
+        let range = self.text_range(tree);
+        if offset < range.start() || offset >= range.end() {
+            return TokenAtOffset::None;
+        }
+
         let tokens_range = self.tokens_range(tree);
         let index = tokens_range.partition_point(|token| token.end <= offset);
         let token_index = self.first_token.0 + index;
@@ -1164,6 +1169,7 @@ pub struct TreeBuilder {
     node_children: Vec<NodeOrTokenRef>,
     tokens: Vec<Token>,
     text: String,
+    unparsable_ranges: Vec<TextRange>,
 
     node_children_pool: VecPool<NodeOrTokenRef>,
     opened: Vec<Frame>,
@@ -1181,8 +1187,8 @@ impl Drop for TreeBuilder {
 }
 
 const DEFAULT_TREE_DEPTH: usize = 128;
-const DEFAULT_TREE_SIZE: usize = 1024;
 const DEFAULT_CHILDREN_LEN: usize = 10;
+const MIN_TREE_CAP: usize = 16;
 
 impl TreeBuilder {
     pub(crate) fn new_rootless_with_caps(source: impl Into<String>, token_cap: usize) -> Self {
@@ -1190,7 +1196,8 @@ impl TreeBuilder {
     }
 
     fn new_impl(text: String, root_kind: Option<SyntaxKind>, token_cap: usize) -> Self {
-        let mut nodes = Vec::with_capacity(DEFAULT_TREE_SIZE);
+        let tree_cap = token_cap.max(MIN_TREE_CAP);
+        let mut nodes = Vec::with_capacity(tree_cap);
         let mut node_children_pool = VecPool::new(DEFAULT_TREE_DEPTH, DEFAULT_CHILDREN_LEN);
         let mut opened = Vec::with_capacity(DEFAULT_TREE_DEPTH);
         if let Some(kind) = root_kind {
@@ -1207,19 +1214,19 @@ impl TreeBuilder {
                 token_range: None,
             });
         }
-        let mut tokens = Vec::with_capacity(DEFAULT_TREE_SIZE);
+        let mut tokens = Vec::with_capacity(tree_cap);
         tokens.push(Token {
             kind: SyntaxKind::EndOfFile,
             attached_trivia: AttachedTrivia::new(false, false, 0),
             end: TextSize::new(0),
             parent: NodeId(0),
         });
-        tokens.reserve(token_cap.saturating_sub(tokens.len()));
         Self {
             nodes,
-            node_children: Vec::with_capacity(DEFAULT_TREE_SIZE),
+            node_children: Vec::with_capacity(tree_cap),
             tokens,
             text,
+            unparsable_ranges: Vec::new(),
 
             node_children_pool,
             opened,
@@ -1318,10 +1325,16 @@ impl TreeBuilder {
     fn close_top_frame(&mut self) {
         let Frame { id, children, token_range } = self.opened.pop().expect("no opened nodes?");
         let (first, last) = token_range.expect("node without tokens");
+        let kind = self.nodes[id.0].kind;
         let node = &mut self.nodes[id.0];
         node.first_token = first;
         node.last_token = last;
         self.close_node_frame(id, children);
+        if kind == SyntaxKind::Unparsable {
+            debug_assert!(first.0 > 0, "real tokens should follow the sentinel EOF token");
+            self.unparsable_ranges
+                .push(TextRange::new(self.tokens[first.0 - 1].end, self.tokens[last.0].end));
+        }
         if let Some(parent) = self.opened.last_mut() {
             Self::bump_range(&mut parent.token_range, (first, last));
         }
@@ -1393,10 +1406,18 @@ impl TreeBuilder {
     pub fn finish(self) -> SyntaxTree {
         let mut builder = self;
         builder.flush_pending();
-        SyntaxTree { tree: builder.finish_impl() }
+        let (tree, _) = builder.finish_impl();
+        SyntaxTree { tree }
     }
 
-    fn finish_impl(mut self) -> Tree {
+    fn finish_with_unparsable_ranges(self) -> (SyntaxTree, Vec<TextRange>) {
+        let mut builder = self;
+        builder.flush_pending();
+        let (tree, unparsable_ranges) = builder.finish_impl();
+        (SyntaxTree { tree }, unparsable_ranges)
+    }
+
+    fn finish_impl(mut self) -> (Tree, Vec<TextRange>) {
         match self.opened.len() {
             0 => {
                 assert!(!self.nodes.is_empty(), "no root node");
@@ -1413,8 +1434,9 @@ impl TreeBuilder {
                 node_children: std::mem::take(&mut self.node_children),
             },
         };
+        let unparsable_ranges = std::mem::take(&mut self.unparsable_ranges);
         self.opened.clear();
-        Tree(Rc::new(tree))
+        (Tree(Rc::new(tree)), unparsable_ranges)
     }
 }
 
@@ -1474,10 +1496,11 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-pub fn parse(sql: &str, dialect_kind: DialectKind) -> Result<SyntaxTree, ParseError> {
+pub fn parse(sql: impl Into<String>, dialect_kind: DialectKind) -> Result<SyntaxTree, ParseError> {
+    let sql = sql.into();
     let dialect = kind_to_dialect(&dialect_kind).ok_or(ParseError::UnknownDialect(dialect_kind))?;
     let lexer = Lexer::from(&dialect);
-    let (tokens, lex_errors) = lexer.lex_str(sql);
+    let (tokens, lex_errors) = lexer.lex_str(&sql);
     if !lex_errors.is_empty() {
         return Err(ParseError::Lex(lex_errors));
     }
@@ -1486,25 +1509,25 @@ pub fn parse(sql: &str, dialect_kind: DialectKind) -> Result<SyntaxTree, ParseEr
     let sink = TreeBuilder::new_rootless_with_caps(sql, tokens.len().saturating_add(1));
     let parse_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut sink = sink;
-        parser.parse_with_sink(&tokens, &mut sink)?;
-        Ok(sink.finish())
+        match parser.parse_with_sink(&tokens, &mut sink) {
+            Ok(()) => Ok(sink.finish_with_unparsable_ranges()),
+            Err(err) => {
+                sink.abandon();
+                Err(err)
+            }
+        }
     }));
     match parse_result {
-        Ok(Ok(tree)) => {
-            let ranges = collect_unparsable_ranges(&tree);
-            if ranges.is_empty() { Ok(tree) } else { Err(ParseError::Unparsable(ranges)) }
+        Ok(Ok((tree, ranges))) => {
+            if ranges.is_empty() {
+                Ok(tree)
+            } else {
+                Err(ParseError::Unparsable(ranges))
+            }
         }
         Ok(Err(err)) => Err(ParseError::Parse(err)),
         Err(panic) => Err(ParseError::Panic(panic_message(panic))),
     }
-}
-
-fn collect_unparsable_ranges(tree: &SyntaxTree) -> Vec<TextRange> {
-    tree.root()
-        .descendants()
-        .filter(|node| node.kind() == SyntaxKind::Unparsable)
-        .map(|node| node.text_range())
-        .collect()
 }
 
 fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
@@ -1595,10 +1618,11 @@ pub fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> Result<String, EditE
 
     edits.sort_by_key(|edit| edit.range.start());
 
-    let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
+    let mut removed_bytes = 0usize;
+    let mut replacement_bytes = 0usize;
 
-    for edit in edits {
+    for edit in &edits {
         let start = usize::from(edit.range.start());
         let end = usize::from(edit.range.end());
 
@@ -1611,6 +1635,19 @@ pub fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> Result<String, EditE
         if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
             return Err(EditError::InvalidBoundary);
         }
+
+        removed_bytes += end - start;
+        replacement_bytes += edit.replacement.len();
+        cursor = end;
+    }
+
+    let final_len = text.len() - removed_bytes + replacement_bytes;
+    let mut out = String::with_capacity(final_len);
+    let mut cursor = 0usize;
+
+    for edit in edits {
+        let start = usize::from(edit.range.start());
+        let end = usize::from(edit.range.end());
 
         out.push_str(&text[cursor..start]);
         out.push_str(&edit.replacement);
@@ -1625,19 +1662,248 @@ pub fn apply_edits(text: &str, mut edits: Vec<TextEdit>) -> Result<String, EditE
 mod tests {
     use super::*;
 
+    fn parse_ok(sql: impl Into<String>) -> SyntaxTree {
+        parse(sql, DialectKind::Ansi).unwrap()
+    }
+
+    fn unsupported_dialect() -> Option<DialectKind> {
+        [
+            DialectKind::Ansi,
+            DialectKind::Athena,
+            DialectKind::Bigquery,
+            DialectKind::Clickhouse,
+            DialectKind::Databricks,
+            DialectKind::Duckdb,
+            DialectKind::Mysql,
+            DialectKind::Postgres,
+            DialectKind::Redshift,
+            DialectKind::Snowflake,
+            DialectKind::Sparksql,
+            DialectKind::Sqlite,
+            DialectKind::Trino,
+            DialectKind::Tsql,
+        ]
+        .into_iter()
+        .find(|kind| kind_to_dialect(kind).is_none())
+    }
+
+    fn nested_function_node(tree: &SyntaxTree) -> SyntaxNode {
+        tree.root()
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::Function)
+            .expect("expected a nested function node")
+    }
+
+    fn assert_token_texts(tokens: TokenAtOffset, expected: &[&str]) {
+        let actual: Vec<_> = tokens.map(|token| token.text().to_string()).collect();
+        let expected: Vec<_> = expected.iter().map(|text| (*text).to_string()).collect();
+        assert_eq!(actual, expected);
+    }
+
+    fn assert_token_kinds(tokens: TokenAtOffset, expected: &[SyntaxKind]) {
+        let actual: Vec<_> = tokens.map(|token| token.kind()).collect();
+        assert_eq!(actual, expected);
+    }
+
     #[test]
-    fn parse_returns_result_never_panics_on_valid_sql() {
+    fn parse_accepts_borrowed_sql() {
         let result = parse("SELECT 1", DialectKind::Ansi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn parse_returns_error_for_unknown_dialect() {
-        // DialectKind that is not supported should produce ParseError::UnknownDialect
-        // We can't easily force a panic here, but we verify the parse path doesn't
-        // panic for empty input
-        let result = parse("", DialectKind::Ansi);
+    fn parse_accepts_owned_sql() {
+        let result = parse("SELECT 1".to_string(), DialectKind::Ansi);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn parse_returns_error_for_unknown_dialect_when_a_dialect_is_unavailable() {
+        let Some(dialect) = unsupported_dialect() else {
+            return;
+        };
+
+        let result = parse("SELECT 1", dialect);
+        let Err(ParseError::UnknownDialect(actual)) = result else {
+            panic!("expected unknown dialect parse error");
+        };
+
+        assert_eq!(actual, dialect);
+    }
+
+    #[test]
+    fn parse_whitespace_only_input_succeeds() {
+        let tree = parse_ok("   \n\t");
+        assert_eq!(tree.text(), "   \n\t");
+        assert_eq!(tree.root().text(), "   \n\t");
+    }
+
+    #[test]
+    fn parse_comment_only_input_succeeds() {
+        let tree = parse_ok("-- leading comment");
+        assert_eq!(tree.text(), "-- leading comment");
+        assert_eq!(tree.root().text(), "-- leading comment");
+    }
+
+    #[test]
+    fn parse_returns_unparsable_ranges_without_post_walk() {
+        let result = parse("SELECT FROM foo", DialectKind::Ansi);
+        let Err(ParseError::Unparsable(ranges)) = result else {
+            panic!("expected unparsable parse error");
+        };
+
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&"SELECT FROM foo"[ranges[0]], "SELECT");
+    }
+
+    #[test]
+    fn parse_errors_do_not_turn_into_parse_error_panic() {
+        let result = parse("SELECT (1", DialectKind::Ansi);
+        let Err(ParseError::Parse(error)) = result else {
+            panic!("expected parser error, not panic");
+        };
+
+        assert!(error.description.contains("closing bracket"));
+    }
+
+    #[test]
+    fn large_trivia_groups_are_reported_as_parse_panics() {
+        let sql = format!("{}SELECT 1", "/*x*/".repeat(usize::from(u16::MAX) + 1));
+        let result = parse(sql, DialectKind::Ansi);
+        let Err(ParseError::Panic(message)) = result else {
+            panic!("expected panic parse error for trivia overflow");
+        };
+
+        assert!(message.contains("trivia_len must fit into u16"));
+    }
+
+    #[test]
+    fn token_at_offset_handles_root_boundaries() {
+        let tree = parse_ok("SELECT 1");
+        let root = tree.root();
+
+        assert_token_kinds(root.token_at_offset(0.into()), &[SyntaxKind::Keyword]);
+        assert_token_kinds(
+            root.token_at_offset(6.into()),
+            &[SyntaxKind::Indent, SyntaxKind::Whitespace],
+        );
+        assert!(matches!(root.token_at_offset(8.into()), TokenAtOffset::None));
+        assert!(matches!(root.token_at_offset(9.into()), TokenAtOffset::None));
+    }
+
+    #[test]
+    fn token_at_offset_handles_nested_node_boundaries() {
+        let tree = parse_ok("SELECT sum(foo) FROM bar");
+        let function = nested_function_node(&tree);
+        let range = function.text_range();
+        let start = usize::from(range.start());
+        let end = usize::from(range.end());
+
+        assert_token_texts(function.token_at_offset((start - 1).try_into().unwrap()), &[]);
+        assert_token_kinds(
+            function.token_at_offset(range.start()),
+            &[SyntaxKind::Indent, SyntaxKind::Whitespace],
+        );
+        assert_token_texts(function.token_at_offset(10.into()), &["sum", "("]);
+        assert!(matches!(function.token_at_offset(range.end()), TokenAtOffset::None));
+        assert_token_texts(function.token_at_offset((end + 1).try_into().unwrap()), &[]);
+    }
+
+    #[test]
+    fn apply_edits_handles_equal_length_replacements() {
+        let result = apply_edits(
+            "SELECT 1",
+            vec![TextEdit::replace(TextRange::new(7.into(), 8.into()), "2")],
+        )
+        .unwrap();
+
+        assert_eq!(result, "SELECT 2");
+    }
+
+    #[test]
+    fn apply_edits_handles_growing_replacements() {
+        let result = apply_edits(
+            "SELECT 1",
+            vec![TextEdit::replace(TextRange::new(7.into(), 8.into()), "123")],
+        )
+        .unwrap();
+
+        assert_eq!(result, "SELECT 123");
+    }
+
+    #[test]
+    fn apply_edits_handles_shrinking_replacements() {
+        let result = apply_edits(
+            "SELECT 123",
+            vec![TextEdit::replace(TextRange::new(7.into(), 10.into()), "1")],
+        )
+        .unwrap();
+
+        assert_eq!(result, "SELECT 1");
+    }
+
+    #[test]
+    fn apply_edits_handles_unicode_boundaries() {
+        let text = "a😀b";
+        let result =
+            apply_edits(text, vec![TextEdit::replace(TextRange::new(1.into(), 5.into()), "🙂")])
+                .unwrap();
+
+        assert_eq!(result, "a🙂b");
+    }
+
+    #[test]
+    fn apply_edits_rejects_invalid_unicode_boundaries() {
+        let text = "a😀b";
+        let result =
+            apply_edits(text, vec![TextEdit::replace(TextRange::new(2.into(), 5.into()), "x")]);
+
+        assert_eq!(result, Err(EditError::InvalidBoundary));
+    }
+
+    #[test]
+    fn apply_edits_handles_insertion_at_eof() {
+        let result = apply_edits("SELECT", vec![TextEdit::insert(6.into(), " 1")]).unwrap();
+
+        assert_eq!(result, "SELECT 1");
+    }
+
+    #[test]
+    fn apply_edits_handles_adjacent_edits() {
+        let result = apply_edits(
+            "abcd",
+            vec![
+                TextEdit::replace(TextRange::new(1.into(), 2.into()), "B"),
+                TextEdit::replace(TextRange::new(2.into(), 3.into()), "C"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result, "aBCd");
+    }
+
+    #[test]
+    fn apply_edits_rejects_overlapping_edits() {
+        let result = apply_edits(
+            "abcd",
+            vec![
+                TextEdit::replace(TextRange::new(1.into(), 3.into()), "BC"),
+                TextEdit::replace(TextRange::new(2.into(), 4.into()), "CD"),
+            ],
+        );
+
+        assert_eq!(result, Err(EditError::Overlap));
+    }
+
+    #[test]
+    fn apply_edits_preserves_same_offset_insert_order() {
+        let result = apply_edits(
+            "ab",
+            vec![TextEdit::insert(1.into(), "X"), TextEdit::insert(1.into(), "Y")],
+        )
+        .unwrap();
+
+        assert_eq!(result, "aXYb");
     }
 
     #[test]
