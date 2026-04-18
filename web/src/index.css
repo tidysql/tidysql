@@ -1,5 +1,5 @@
 :root {
-  font-family: "Space Grotesk", "Noto Sans", sans-serif;
+  font-family: "Inter", "Noto Sans", sans-serif;
   line-height: 1.4;
   font-weight: 400;
   color-scheme: light;
@@ -7,20 +7,16 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --primary: #135bec;
+  --primary: #3b82f6;
   --background-light: #ffffff;
-  --background-subtle: #f8f9fc;
-  --border-light: #e7ebf3;
-  --border-darker: #d2d8e4;
-  --text-main: #0d121b;
-  --text-muted: #4c669a;
+  --background-subtle: #ffffff;
+  --border-light: #e5e7eb;
+  --border-dark: #d4d4d8;
+  --text-main: #111111;
+  --text-muted: #5f5f66;
   --editor-bg: #ffffff;
-  --editor-gutter: #f4f5f8;
-  --code-keyword: #a626a4;
-  --code-string: #50a14f;
-  --code-func: #4078f2;
-  --severity-error: #ef4444;
-  --severity-warning: #f59e0b;
+  --severity-error: #dc2626;
+  --severity-warning: #d97706;
   --severity-style: #6b7280;
 }
 
@@ -33,14 +29,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: var(--background-subtle);
-  background-image: radial-gradient(
-      circle at top left,
-      rgba(255, 255, 255, 0.9),
-      rgba(248, 249, 252, 0.2) 45%,
-      rgba(232, 237, 248, 0.8) 100%
-    ),
-    linear-gradient(120deg, rgba(19, 91, 236, 0.06), transparent 45%);
+  background-color: var(--background-light);
   color: var(--text-main);
   overflow: hidden;
 }
@@ -61,7 +50,7 @@ textarea {
 }
 
 ::selection {
-  background: rgba(19, 91, 236, 0.16);
+  background: rgba(59, 130, 246, 0.18);
 }
 
 #monaco-overlays {
@@ -84,7 +73,7 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--background-subtle);
+  background: var(--background-light);
   color: var(--text-main);
 }
 
@@ -92,9 +81,9 @@ textarea {
   width: min(520px, 100%);
   background: var(--background-light);
   border: 1px solid var(--border-light);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
 .error-title {
@@ -105,7 +94,7 @@ textarea {
 
 .error-message {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -113,9 +102,9 @@ textarea {
 .error-details {
   margin: 0 0 16px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 1px solid var(--border-light);
-  background: #f4f6fb;
+  background: #fafafa;
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   white-space: pre-wrap;
