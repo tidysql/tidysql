@@ -78,7 +78,7 @@ fn collect_fixes(diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
 
 fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
     match error {
-        ParseError::UnknownDialect(kind) => vec![Diagnostic::new(
+        ParseError::UnavailableDialect(kind) => vec![Diagnostic::new(
             CODE_UNKNOWN_DIALECT,
             format!("Dialect not available: {kind:?}"),
             Severity::Error,
@@ -101,7 +101,7 @@ fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
             Severity::Error,
             error.span.map(|span| span.source_range()).unwrap_or(0..0),
         )],
-        ParseError::Unparsable(ranges) => ranges
+        ParseError::UnparsableRanges(ranges) => ranges
             .into_iter()
             .map(|range| {
                 Diagnostic::from_text_range(
@@ -112,7 +112,7 @@ fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
                 )
             })
             .collect(),
-        ParseError::Panic(message) => {
+        ParseError::ParserPanic(message) => {
             vec![Diagnostic::new(CODE_PANIC, message, Severity::Error, 0..0)]
         }
     }

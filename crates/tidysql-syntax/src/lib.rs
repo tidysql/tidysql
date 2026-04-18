@@ -65,36 +65,36 @@ pub(crate) struct NodeId(pub(crate) usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, GetSize)]
 pub struct TokenId(pub(crate) usize);
 
-pub(crate) type NodeOrTokenRef = NodeOrToken<NodeId, TokenId>;
+pub(crate) type ElementId = NodeOrToken<NodeId, TokenId>;
 
 #[derive(Clone, Copy, GetSize)]
-pub(crate) struct Token {
+pub(crate) struct TokenData {
     #[get_size(ignore)]
     pub(crate) kind: SyntaxKind,
-    pub(crate) attached_trivia: AttachedTrivia,
+    pub(crate) trivia: TriviaAttachment,
     #[get_size(ignore)]
     pub(crate) end: TextSize,
-    pub(crate) parent: NodeId,
+    pub(crate) parent_id: NodeId,
 }
 
 #[derive(Clone, Copy, GetSize)]
-pub(crate) struct AttachedTrivia {
+pub(crate) struct TriviaAttachment {
     has_leading_trivia: bool,
     has_trailing_trivia: bool,
-    trivia_len: u16,
+    trivia_count: u16,
 }
 
-impl AttachedTrivia {
+impl TriviaAttachment {
     #[inline]
     pub(crate) fn new(
         has_leading_trivia: bool,
         has_trailing_trivia: bool,
-        trivia_len: usize,
-    ) -> AttachedTrivia {
-        AttachedTrivia {
+        trivia_count: usize,
+    ) -> TriviaAttachment {
+        TriviaAttachment {
             has_leading_trivia,
             has_trailing_trivia,
-            trivia_len: u16::try_from(trivia_len).expect("trivia_len must fit into u16"),
+            trivia_count: u16::try_from(trivia_count).expect("trivia_count must fit into u16"),
         }
     }
 
@@ -109,39 +109,39 @@ impl AttachedTrivia {
     }
 
     #[inline]
-    pub(crate) fn trivia_len(self) -> usize {
-        self.trivia_len as usize
+    pub(crate) fn trivia_count(self) -> usize {
+        self.trivia_count as usize
     }
 }
 
 impl TokenId {
     #[inline]
-    pub(crate) fn get(self, tree: &TreeInner) -> &Token {
+    pub(crate) fn get(self, tree: &TreeData) -> &TokenData {
         &tree.tokens[self.0]
     }
 
     #[inline]
-    fn prev_maybe_fake_token(self, tree: &TreeInner) -> &Token {
+    fn prev_or_sentinel(self, tree: &TreeData) -> &TokenData {
         &tree.tokens[self.0 - 1]
     }
 
     #[inline]
-    pub(crate) fn start(self, tree: &TreeInner) -> TextSize {
-        self.prev_maybe_fake_token(tree).end
+    pub(crate) fn start(self, tree: &TreeData) -> TextSize {
+        self.prev_or_sentinel(tree).end
     }
 
     #[inline]
-    pub(crate) fn end(self, tree: &TreeInner) -> TextSize {
+    pub(crate) fn end(self, tree: &TreeData) -> TextSize {
         self.get(tree).end
     }
 
     #[inline]
-    pub(crate) fn text_range(self, tree: &TreeInner) -> TextRange {
+    pub(crate) fn text_range(self, tree: &TreeData) -> TextRange {
         TextRange::new(self.start(tree), self.get(tree).end)
     }
 
     #[inline]
-    pub(crate) fn text(self, tree: &TreeInner) -> &str {
+    pub(crate) fn text(self, tree: &TreeData) -> &str {
         &tree.text[self.text_range(tree)]
     }
 
@@ -151,46 +151,46 @@ impl TokenId {
     }
 
     #[inline]
-    pub(crate) fn next_token(self, tree: &TreeInner) -> Option<Self> {
+    pub(crate) fn next_token(self, tree: &TreeData) -> Option<Self> {
         let next = self.0 + 1;
         if next >= tree.tokens.len() { None } else { Some(TokenId(next)) }
     }
 
     #[inline]
-    pub(crate) fn leading_trivia(self, tree: &TreeInner) -> TokenIter {
-        if !self.get(tree).attached_trivia.has_leading_trivia() {
-            return TokenIter::empty();
+    pub(crate) fn leading_trivia(self, tree: &TreeData) -> TokenIdIter {
+        if !self.get(tree).trivia.has_leading_trivia() {
+            return TokenIdIter::empty();
         }
 
-        let trivia_len = self.get(tree).attached_trivia.trivia_len();
-        let trivia_start = self.0 - trivia_len;
-        TokenIter::new(trivia_start, trivia_len)
+        let trivia_count = self.get(tree).trivia.trivia_count();
+        let trivia_start = self.0 - trivia_count;
+        TokenIdIter::new(trivia_start, trivia_count)
     }
 
     #[inline]
-    pub(crate) fn trailing_trivia(self, tree: &TreeInner) -> TokenIter {
-        if !self.get(tree).attached_trivia.has_trailing_trivia() {
-            return TokenIter::empty();
+    pub(crate) fn trailing_trivia(self, tree: &TreeData) -> TokenIdIter {
+        if !self.get(tree).trivia.has_trailing_trivia() {
+            return TokenIdIter::empty();
         }
 
         let trivia_start = self.0 + 1;
-        let trivia_len = tree.tokens[trivia_start].attached_trivia.trivia_len();
-        TokenIter::new(trivia_start, trivia_len)
+        let trivia_count = tree.tokens[trivia_start].trivia.trivia_count();
+        TokenIdIter::new(trivia_start, trivia_count)
     }
 
     #[inline]
-    pub(crate) fn parent(self, tree: &TreeInner) -> NodeId {
-        self.get(tree).parent
+    pub(crate) fn parent(self, tree: &TreeData) -> NodeId {
+        self.get(tree).parent_id
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct TokenIter {
+pub(crate) struct TokenIdIter {
     current: usize,
     end: usize,
 }
 
-impl TokenIter {
+impl TokenIdIter {
     #[inline]
     fn new(start: usize, len: usize) -> Self {
         Self { current: start, end: start + len }
@@ -212,7 +212,7 @@ impl TokenIter {
     }
 }
 
-impl Iterator for TokenIter {
+impl Iterator for TokenIdIter {
     type Item = TokenId;
 
     #[inline]
@@ -227,7 +227,7 @@ impl Iterator for TokenIter {
     }
 }
 
-impl DoubleEndedIterator for TokenIter {
+impl DoubleEndedIterator for TokenIdIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.is_empty() {
@@ -240,66 +240,66 @@ impl DoubleEndedIterator for TokenIter {
 }
 
 #[derive(GetSize)]
-pub(crate) struct Nodes {
-    pub(crate) nodes: Vec<Node>,
-    pub(crate) node_children: Vec<NodeOrTokenRef>,
+pub(crate) struct NodeStore {
+    pub(crate) nodes: Vec<NodeData>,
+    pub(crate) node_children: Vec<ElementId>,
 }
 
-impl Nodes {}
+impl NodeStore {}
 
 #[derive(GetSize)]
-pub(crate) struct Node {
-    pub(crate) parent: Option<NodeId>,
-    pub(crate) children: Range<usize>,
+pub(crate) struct NodeData {
+    pub(crate) parent_id: Option<NodeId>,
+    pub(crate) child_range: Range<usize>,
     #[get_size(ignore)]
     pub(crate) kind: SyntaxKind,
-    pub(crate) first_token: TokenId,
-    pub(crate) last_token: TokenId,
+    pub(crate) first_token_id: TokenId,
+    pub(crate) last_token_id: TokenId,
 }
 
-impl Node {
+impl NodeData {
     #[inline]
-    pub(crate) fn text_range(&self, tree: &TreeInner) -> TextRange {
+    pub(crate) fn text_range(&self, tree: &TreeData) -> TextRange {
         TextRange::new(self.first_token(tree).start(tree), self.last_token(tree).end(tree))
     }
 
     #[inline]
-    pub(crate) fn text<'a>(&self, tree: &'a TreeInner) -> &'a str {
+    pub(crate) fn text<'a>(&self, tree: &'a TreeData) -> &'a str {
         let range = self.text_range(tree);
         &tree.text[range]
     }
 
     #[inline]
-    pub(crate) fn first_token(&self, _tree: &TreeInner) -> TokenId {
-        self.first_token
+    pub(crate) fn first_token(&self, _tree: &TreeData) -> TokenId {
+        self.first_token_id
     }
 
     #[inline]
-    pub(crate) fn last_token(&self, _tree: &TreeInner) -> TokenId {
-        self.last_token
+    pub(crate) fn last_token(&self, _tree: &TreeData) -> TokenId {
+        self.last_token_id
     }
 
     #[inline]
     pub(crate) fn parent(&self) -> Option<NodeId> {
-        self.parent
+        self.parent_id
     }
 
     #[inline]
-    pub(crate) fn children<'a>(&self, tree: &'a TreeInner) -> &'a [NodeOrTokenRef] {
-        &tree.nodes.node_children[self.children.clone()]
+    pub(crate) fn children<'a>(&self, tree: &'a TreeData) -> &'a [ElementId] {
+        &tree.node_store.node_children[self.child_range.clone()]
     }
 
     #[inline]
-    fn tokens_range<'a>(&self, tree: &'a TreeInner) -> &'a [Token] {
-        let start = self.first_token.0;
-        let end = self.last_token.0.saturating_add(1);
+    fn token_slice<'a>(&self, tree: &'a TreeData) -> &'a [TokenData] {
+        let start = self.first_token_id.0;
+        let end = self.last_token_id.0.saturating_add(1);
         &tree.tokens[start..end]
     }
 
     #[inline]
     pub(crate) fn token_at_offset(
         &self,
-        tree: &TreeInner,
+        tree: &TreeData,
         offset: TextSize,
     ) -> TokenAtOffset<TokenId> {
         let range = self.text_range(tree);
@@ -307,58 +307,58 @@ impl Node {
             return TokenAtOffset::None;
         }
 
-        let tokens_range = self.tokens_range(tree);
-        let index = tokens_range.partition_point(|token| token.end <= offset);
-        let token_index = self.first_token.0 + index;
+        let token_slice = self.token_slice(tree);
+        let index = token_slice.partition_point(|token_data| token_data.end <= offset);
+        let token_index = self.first_token_id.0 + index;
         if token_index >= tree.tokens.len() {
             return TokenAtOffset::None;
         }
-        let second_token = TokenId(token_index);
-        if second_token.end(tree) <= offset {
+        let right_token = TokenId(token_index);
+        if right_token.end(tree) <= offset {
             return TokenAtOffset::None;
         }
-        if let Some(first_token) = second_token.prev_token()
-            && first_token.end(tree) == offset
+        if let Some(left_token) = right_token.prev_token()
+            && left_token.end(tree) == offset
         {
-            TokenAtOffset::Between(first_token, second_token)
+            TokenAtOffset::Between(left_token, right_token)
         } else {
-            TokenAtOffset::Single(second_token)
+            TokenAtOffset::Single(right_token)
         }
     }
 
     #[inline]
-    pub(crate) fn covering_element(&self, tree: &TreeInner, range: TextRange) -> NodeOrTokenRef {
-        let token = self
+    pub(crate) fn covering_element(&self, tree: &TreeData, range: TextRange) -> ElementId {
+        let token_id = self
             .token_at_offset(tree, range.start())
             .right_biased()
             .expect("range is not inside the node");
-        if token.text_range(tree).contains_range(range) {
-            return NodeOrTokenRef::Token(token);
+        if token_id.text_range(tree).contains_range(range) {
+            return ElementId::Token(token_id);
         }
-        let mut current = token.parent(tree);
+        let mut current_node_id = token_id.parent(tree);
         loop {
-            let node = &tree.nodes.nodes[current.0];
-            if node.text_range(tree).contains_range(range) {
-                return NodeOrTokenRef::Node(current);
+            let node_data = &tree.node_store.nodes[current_node_id.0];
+            if node_data.text_range(tree).contains_range(range) {
+                return ElementId::Node(current_node_id);
             }
-            current = node.parent.expect("range is not inside the node");
+            current_node_id = node_data.parent_id.expect("range is not inside the node");
         }
     }
 }
 
 #[derive(Clone, GetSize)]
-pub(crate) struct Tree(pub(crate) Rc<TreeInner>);
+pub(crate) struct SharedTree(pub(crate) Rc<TreeData>);
 
 #[derive(GetSize)]
-pub(crate) struct TreeInner {
+pub(crate) struct TreeData {
     pub(crate) text: String,
-    pub(crate) tokens: Vec<Token>,
-    pub(crate) nodes: Nodes,
+    pub(crate) tokens: Vec<TokenData>,
+    pub(crate) node_store: NodeStore,
 }
 
 #[derive(GetSize)]
 pub struct SyntaxTree {
-    pub(crate) tree: Tree,
+    pub(crate) tree: SharedTree,
 }
 
 impl Clone for SyntaxTree {
@@ -371,7 +371,7 @@ impl Clone for SyntaxTree {
 impl SyntaxTree {
     #[inline]
     pub fn root(&self) -> SyntaxNode {
-        SyntaxNode { tree: self.tree.clone(), node: NodeId(0) }
+        SyntaxNode { tree: self.tree.clone(), node_id: NodeId(0) }
     }
 
     #[inline]
@@ -387,49 +387,49 @@ impl SyntaxTree {
 
 #[derive(Clone)]
 pub struct SyntaxToken {
-    tree: Tree,
-    token: TokenId,
+    tree: SharedTree,
+    token_id: TokenId,
 }
 
 impl SyntaxToken {
     #[inline]
     pub fn id(&self) -> TokenId {
-        self.token
+        self.token_id
     }
 
     #[inline]
     pub fn kind(&self) -> SyntaxKind {
-        self.token.get(&self.tree.0).kind
+        self.token_id.get(&self.tree.0).kind
     }
 
     #[inline]
     pub fn text_range(&self) -> TextRange {
-        self.token.text_range(&self.tree.0)
+        self.token_id.text_range(&self.tree.0)
     }
 
     #[inline]
     pub fn prev_token(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), token: self.token.prev_token()? })
+        Some(Self { tree: self.tree.clone(), token_id: self.token_id.prev_token()? })
     }
 
     #[inline]
     pub fn next_token(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), token: self.token.next_token(&self.tree.0)? })
+        Some(Self { tree: self.tree.clone(), token_id: self.token_id.next_token(&self.tree.0)? })
     }
 
     #[inline]
     pub fn leading_trivia(&self) -> TriviaIter {
-        TriviaIter { tree: self.tree.clone(), tokens: self.token.leading_trivia(&self.tree.0) }
+        TriviaIter { tree: self.tree.clone(), tokens: self.token_id.leading_trivia(&self.tree.0) }
     }
 
     #[inline]
     pub fn trailing_trivia(&self) -> TriviaIter {
-        TriviaIter { tree: self.tree.clone(), tokens: self.token.trailing_trivia(&self.tree.0) }
+        TriviaIter { tree: self.tree.clone(), tokens: self.token_id.trailing_trivia(&self.tree.0) }
     }
 
     #[inline]
     pub fn text(&self) -> &str {
-        self.token.text(&self.tree.0)
+        self.token_id.text(&self.tree.0)
     }
 
     #[inline]
@@ -437,7 +437,7 @@ impl SyntaxToken {
         let first_token = self.leading_trivia().next().unwrap_or_else(|| self.clone());
         let last_token = self.trailing_trivia().next_back().unwrap_or_else(|| self.clone());
         let tree = &self.tree.0;
-        TextRange::new(first_token.token.start(tree), last_token.token.end(tree))
+        TextRange::new(first_token.token_id.start(tree), last_token.token_id.end(tree))
     }
 
     #[inline]
@@ -447,19 +447,19 @@ impl SyntaxToken {
 
     #[inline]
     pub fn parent(&self) -> SyntaxNode {
-        SyntaxNode { tree: self.tree.clone(), node: self.token.parent(&self.tree.0) }
+        SyntaxNode { tree: self.tree.clone(), node_id: self.token_id.parent(&self.tree.0) }
     }
 
     #[inline]
-    pub fn parent_ancestors(&self) -> impl Iterator<Item = SyntaxNode> + Clone {
-        std::iter::successors(Some(self.parent()), |it: &SyntaxNode| it.parent())
+    pub fn ancestors(&self) -> impl Iterator<Item = SyntaxNode> + Clone {
+        std::iter::successors(Some(self.parent()), |node: &SyntaxNode| node.parent())
     }
 }
 
 #[derive(Clone)]
 pub struct TriviaIter {
-    tree: Tree,
-    tokens: TokenIter,
+    tree: SharedTree,
+    tokens: TokenIdIter,
 }
 
 impl Iterator for TriviaIter {
@@ -467,7 +467,7 @@ impl Iterator for TriviaIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        Some(SyntaxToken { tree: self.tree.clone(), token: self.tokens.next()? })
+        Some(SyntaxToken { tree: self.tree.clone(), token_id: self.tokens.next()? })
     }
 
     #[inline]
@@ -488,7 +488,7 @@ impl Iterator for TriviaIter {
 impl DoubleEndedIterator for TriviaIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        Some(SyntaxToken { tree: self.tree.clone(), token: self.tokens.next_back()? })
+        Some(SyntaxToken { tree: self.tree.clone(), token_id: self.tokens.next_back()? })
     }
 }
 
@@ -558,18 +558,18 @@ pub type SyntaxElement = NodeOrToken<SyntaxNode, SyntaxToken>;
 
 #[derive(Clone)]
 pub struct SyntaxNode {
-    tree: Tree,
-    node: NodeId,
+    tree: SharedTree,
+    node_id: NodeId,
 }
 
 impl SyntaxNode {
     #[inline]
-    fn node_data(&self) -> &Node {
-        &self.tree.0.nodes.nodes[self.node.0]
+    fn node_data(&self) -> &NodeData {
+        &self.tree.0.node_store.nodes[self.node_id.0]
     }
 
     #[inline]
-    pub(crate) fn same_tree(&self, other: &SyntaxNode) -> bool {
+    pub(crate) fn shares_tree_with(&self, other: &SyntaxNode) -> bool {
         std::rc::Rc::ptr_eq(&self.tree.0, &other.tree.0)
     }
 
@@ -580,12 +580,15 @@ impl SyntaxNode {
 
     #[inline]
     pub fn first_token(&self) -> SyntaxToken {
-        SyntaxToken { tree: self.tree.clone(), token: self.node_data().first_token(&self.tree.0) }
+        SyntaxToken {
+            tree: self.tree.clone(),
+            token_id: self.node_data().first_token(&self.tree.0),
+        }
     }
 
     #[inline]
     pub fn last_token(&self) -> SyntaxToken {
-        SyntaxToken { tree: self.tree.clone(), token: self.node_data().last_token(&self.tree.0) }
+        SyntaxToken { tree: self.tree.clone(), token_id: self.node_data().last_token(&self.tree.0) }
     }
 
     #[inline]
@@ -600,66 +603,66 @@ impl SyntaxNode {
 
     #[inline]
     pub fn parent(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), node: self.node_data().parent()? })
+        Some(Self { tree: self.tree.clone(), node_id: self.node_data().parent()? })
     }
 
     #[inline]
-    pub fn try_token_at(&self, index: usize) -> Option<SyntaxToken> {
+    pub fn try_token_child(&self, index: usize) -> Option<SyntaxToken> {
         match *self.node_data().children(&self.tree.0).get(index)? {
-            NodeOrTokenRef::Token(token) => Some(SyntaxToken { tree: self.tree.clone(), token }),
-            NodeOrTokenRef::Node(_) => None,
+            ElementId::Token(token_id) => Some(SyntaxToken { tree: self.tree.clone(), token_id }),
+            ElementId::Node(_) => None,
         }
     }
 
     #[inline]
     #[track_caller]
-    pub fn token_at(&self, index: usize) -> SyntaxToken {
-        match self.try_token_at(index) {
-            Some(it) => it,
+    pub fn token_child(&self, index: usize) -> SyntaxToken {
+        match self.try_token_child(index) {
+            Some(token) => token,
             None => expected_token(index),
         }
     }
 
     #[inline]
-    pub fn try_node_at(&self, index: usize) -> Option<SyntaxNode> {
+    pub fn try_node_child(&self, index: usize) -> Option<SyntaxNode> {
         match *self.node_data().children(&self.tree.0).get(index)? {
-            NodeOrTokenRef::Node(node) => Some(SyntaxNode { tree: self.tree.clone(), node }),
-            NodeOrTokenRef::Token(_) => None,
+            ElementId::Node(node_id) => Some(SyntaxNode { tree: self.tree.clone(), node_id }),
+            ElementId::Token(_) => None,
         }
     }
 
     #[inline]
     #[track_caller]
-    pub fn node_at(&self, index: usize) -> SyntaxNode {
-        match self.try_node_at(index) {
-            Some(it) => it,
+    pub fn node_child(&self, index: usize) -> SyntaxNode {
+        match self.try_node_child(index) {
+            Some(node) => node,
             None => expected_node(index),
         }
     }
 
     #[inline]
-    pub fn try_child_at(&self, index: usize) -> Option<SyntaxElement> {
+    pub fn try_child(&self, index: usize) -> Option<SyntaxElement> {
         self.node_data()
             .children(&self.tree.0)
             .get(index)
             .copied()
-            .map(|child| map_node_or_token_ref(&self.tree, child))
+            .map(|element_id| resolve_element_id(&self.tree, element_id))
     }
 
     #[inline]
     #[track_caller]
-    pub fn child_at(&self, index: usize) -> SyntaxElement {
-        map_node_or_token_ref(&self.tree, self.node_data().children(&self.tree.0)[index])
+    pub fn child(&self, index: usize) -> SyntaxElement {
+        resolve_element_id(&self.tree, self.node_data().children(&self.tree.0)[index])
     }
 
     #[inline]
     pub fn ancestors(&self) -> impl Iterator<Item = Self> + Clone {
-        std::iter::successors(Some(self.clone()), |it| it.parent())
+        std::iter::successors(Some(self.clone()), |node| node.parent())
     }
 
     #[inline]
     pub fn children_with_tokens(&self) -> ChildrenWithTokens {
-        ChildrenWithTokens { tree: self.tree.clone(), range: self.node_data().children.clone() }
+        ChildrenWithTokens { tree: self.tree.clone(), range: self.node_data().child_range.clone() }
     }
 
     #[inline]
@@ -698,29 +701,29 @@ impl SyntaxNode {
     pub fn token_at_offset(&self, offset: TextSize) -> TokenAtOffset {
         match self.node_data().token_at_offset(&self.tree.0, offset) {
             TokenAtOffset::None => TokenAtOffset::None,
-            TokenAtOffset::Single(token) => {
-                TokenAtOffset::Single(SyntaxToken { tree: self.tree.clone(), token })
+            TokenAtOffset::Single(token_id) => {
+                TokenAtOffset::Single(SyntaxToken { tree: self.tree.clone(), token_id })
             }
             TokenAtOffset::Between(left, right) => TokenAtOffset::Between(
-                SyntaxToken { tree: self.tree.clone(), token: left },
-                SyntaxToken { tree: self.tree.clone(), token: right },
+                SyntaxToken { tree: self.tree.clone(), token_id: left },
+                SyntaxToken { tree: self.tree.clone(), token_id: right },
             ),
         }
     }
 
     #[inline]
     pub fn covering_element(&self, range: TextRange) -> SyntaxElement {
-        map_node_or_token_ref(&self.tree, self.node_data().covering_element(&self.tree.0, range))
+        resolve_element_id(&self.tree, self.node_data().covering_element(&self.tree.0, range))
     }
 }
 
 #[inline]
-fn map_node_or_token_ref(tree: &Tree, child: NodeOrTokenRef) -> SyntaxElement {
+fn resolve_element_id(tree: &SharedTree, child: ElementId) -> SyntaxElement {
     match child {
-        NodeOrTokenRef::Token(token) => {
-            SyntaxElement::Token(SyntaxToken { tree: tree.clone(), token })
+        ElementId::Token(token_id) => {
+            SyntaxElement::Token(SyntaxToken { tree: tree.clone(), token_id })
         }
-        NodeOrTokenRef::Node(node) => SyntaxElement::Node(SyntaxNode { tree: tree.clone(), node }),
+        ElementId::Node(node_id) => SyntaxElement::Node(SyntaxNode { tree: tree.clone(), node_id }),
     }
 }
 
@@ -740,14 +743,14 @@ fn expected_node(idx: usize) -> ! {
 
 #[derive(Clone)]
 pub struct ChildrenWithTokens {
-    tree: Tree,
+    tree: SharedTree,
     range: std::ops::Range<usize>,
 }
 
 impl ChildrenWithTokens {
     #[inline]
-    fn map_index(&self, index: usize) -> SyntaxElement {
-        map_node_or_token_ref(&self.tree, self.tree.0.nodes.node_children[index])
+    fn element_at(&self, index: usize) -> SyntaxElement {
+        resolve_element_id(&self.tree, self.tree.0.node_store.node_children[index])
     }
 }
 
@@ -756,7 +759,7 @@ impl Iterator for ChildrenWithTokens {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.range.next().map(|index| self.map_index(index))
+        self.range.next().map(|index| self.element_at(index))
     }
 
     #[inline]
@@ -776,7 +779,7 @@ impl Iterator for ChildrenWithTokens {
 impl DoubleEndedIterator for ChildrenWithTokens {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.range.next_back().map(|index| self.map_index(index))
+        self.range.next_back().map(|index| self.element_at(index))
     }
 }
 
@@ -796,15 +799,15 @@ impl Children {
     #[inline]
     fn filter_child(child: SyntaxElement) -> Option<SyntaxNode> {
         match child {
-            SyntaxElement::Node(it) => Some(it),
+            SyntaxElement::Node(node) => Some(node),
             SyntaxElement::Token(_) => None,
         }
     }
 
     #[inline]
-    fn iter(self) -> impl Iterator<Item = SyntaxNode> {
+    fn into_nodes(self) -> impl Iterator<Item = SyntaxNode> {
         self.inner.filter_map(|child| match child {
-            SyntaxElement::Node(it) => Some(it),
+            SyntaxElement::Node(node) => Some(node),
             SyntaxElement::Token(_) => None,
         })
     }
@@ -824,7 +827,7 @@ impl Iterator for Children {
         Self: Sized,
         F: FnMut(B, Self::Item) -> B,
     {
-        self.iter().fold(init, f)
+        self.into_nodes().fold(init, f)
     }
 
     #[inline]
@@ -833,7 +836,7 @@ impl Iterator for Children {
         Self: Sized,
         F: FnMut(Self::Item),
     {
-        self.iter().for_each(f);
+        self.into_nodes().for_each(f);
     }
 }
 
@@ -859,9 +862,9 @@ impl Iterator for Preorder {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.find_map(|item| match item {
-            WalkEventWithTokens::EnterNode(it) => Some(WalkEvent::Enter(it)),
-            WalkEventWithTokens::LeaveNode(it) => Some(WalkEvent::Leave(it)),
+        self.inner.find_map(|event| match event {
+            WalkEventWithTokens::EnterNode(node) => Some(WalkEvent::Enter(node)),
+            WalkEventWithTokens::LeaveNode(node) => Some(WalkEvent::Leave(node)),
             WalkEventWithTokens::Token(_) => None,
         })
     }
@@ -900,8 +903,8 @@ impl Iterator for PreorderWithTokens {
             self.stack.push((root.clone(), root.children_with_tokens()));
             return Some(WalkEventWithTokens::EnterNode(root));
         }
-        let (_, active_node) = self.stack.last_mut()?;
-        match active_node.next() {
+        let (_, child_iter) = self.stack.last_mut()?;
+        match child_iter.next() {
             Some(SyntaxElement::Node(child)) => {
                 self.stack.push((child.clone(), child.children_with_tokens()));
                 Some(WalkEventWithTokens::EnterNode(child))
@@ -924,7 +927,7 @@ pub enum WalkEventWithTokens {
 
 impl PartialEq for SyntaxNode {
     fn eq(&self, other: &Self) -> bool {
-        self.node == other.node && self.same_tree(other)
+        self.node_id == other.node_id && self.shares_tree_with(other)
     }
 }
 
@@ -934,7 +937,7 @@ impl std::hash::Hash for SyntaxNode {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let tree_ptr = std::rc::Rc::as_ptr(&self.tree.0) as usize;
         tree_ptr.hash(state);
-        self.node.hash(state);
+        self.node_id.hash(state);
     }
 }
 
@@ -948,13 +951,13 @@ impl Ord for SyntaxNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let self_ptr = std::rc::Rc::as_ptr(&self.tree.0) as usize;
         let other_ptr = std::rc::Rc::as_ptr(&other.tree.0) as usize;
-        self_ptr.cmp(&other_ptr).then_with(|| self.node.cmp(&other.node))
+        self_ptr.cmp(&other_ptr).then_with(|| self.node_id.cmp(&other.node_id))
     }
 }
 
 impl PartialEq for SyntaxToken {
     fn eq(&self, other: &Self) -> bool {
-        self.token == other.token && std::rc::Rc::ptr_eq(&self.tree.0, &other.tree.0)
+        self.token_id == other.token_id && std::rc::Rc::ptr_eq(&self.tree.0, &other.tree.0)
     }
 }
 
@@ -964,7 +967,7 @@ impl std::hash::Hash for SyntaxToken {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let tree_ptr = std::rc::Rc::as_ptr(&self.tree.0) as usize;
         tree_ptr.hash(state);
-        self.token.hash(state);
+        self.token_id.hash(state);
     }
 }
 
@@ -978,7 +981,7 @@ impl Ord for SyntaxToken {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let self_ptr = std::rc::Rc::as_ptr(&self.tree.0) as usize;
         let other_ptr = std::rc::Rc::as_ptr(&other.tree.0) as usize;
-        self_ptr.cmp(&other_ptr).then_with(|| self.token.cmp(&other.token))
+        self_ptr.cmp(&other_ptr).then_with(|| self.token_id.cmp(&other.token_id))
     }
 }
 
@@ -1055,15 +1058,15 @@ impl From<SyntaxToken> for SyntaxElement {
     }
 }
 
-struct Frame {
-    id: NodeId,
-    children: Vec<NodeOrTokenRef>,
-    token_range: Option<(TokenId, TokenId)>,
+struct OpenNodeFrame {
+    node_id: NodeId,
+    children: Vec<ElementId>,
+    token_bounds: Option<(TokenId, TokenId)>,
 }
 
 struct VecPool<T> {
     pool: Vec<Vec<T>>,
-    default_cap: usize,
+    default_capacity: usize,
 }
 
 struct PendingToken {
@@ -1074,105 +1077,114 @@ struct PendingToken {
 #[derive(Default)]
 struct TriviaState {
     pending: Option<PendingToken>,
-    leading: Vec<(SyntaxKind, TextSize)>,
-    trailing: Vec<(SyntaxKind, TextSize)>,
+    leading_trivia: Vec<(SyntaxKind, TextSize)>,
+    trailing_trivia: Vec<(SyntaxKind, TextSize)>,
 }
 
 impl TriviaState {
     fn new() -> Self {
-        Self { pending: None, leading: Vec::with_capacity(8), trailing: Vec::with_capacity(8) }
+        Self {
+            pending: None,
+            leading_trivia: Vec::with_capacity(8),
+            trailing_trivia: Vec::with_capacity(8),
+        }
     }
 
     #[allow(dead_code)]
     fn abandon(&mut self) {
         self.pending = None;
-        self.leading.clear();
-        self.trailing.clear();
+        self.leading_trivia.clear();
+        self.trailing_trivia.clear();
     }
 
-    fn flush_into(&mut self, out: &mut TreeBuilder) {
+    fn flush_pending_into(&mut self, builder: &mut TreeBuilder) {
         let Some(pending) = self.pending.take() else {
             return;
         };
 
-        let mut leading = std::mem::take(&mut self.leading);
-        let mut trailing = std::mem::take(&mut self.trailing);
+        let mut leading_trivia = std::mem::take(&mut self.leading_trivia);
+        let mut trailing_trivia = std::mem::take(&mut self.trailing_trivia);
 
-        out.emit_token_with_trivia(
-            leading.drain(..),
+        builder.emit_token_with_trivia(
+            leading_trivia.drain(..),
             pending.kind,
             pending.text_len,
-            trailing.drain(..),
+            trailing_trivia.drain(..),
         );
 
-        self.leading = leading;
-        self.trailing = trailing;
+        self.leading_trivia = leading_trivia;
+        self.trailing_trivia = trailing_trivia;
     }
 
     fn push_trivia(&mut self, token: &ParserToken) {
         let text_len = TextSize::of(token.raw.as_str());
         if self.pending.is_some() {
-            self.trailing.push((token.kind, text_len));
+            self.trailing_trivia.push((token.kind, text_len));
         } else {
-            self.leading.push((token.kind, text_len));
+            self.leading_trivia.push((token.kind, text_len));
         }
     }
 
-    fn emit_meta(&mut self, out: &mut TreeBuilder, token: &ParserToken) {
+    fn emit_meta_token(&mut self, builder: &mut TreeBuilder, token: &ParserToken) {
         let text_len = TextSize::of(token.raw.as_str());
-        let mut leading = std::mem::take(&mut self.leading);
+        let mut leading_trivia = std::mem::take(&mut self.leading_trivia);
 
-        out.emit_token_with_trivia(leading.drain(..), token.kind, text_len, std::iter::empty());
+        builder.emit_token_with_trivia(
+            leading_trivia.drain(..),
+            token.kind,
+            text_len,
+            std::iter::empty(),
+        );
 
-        self.leading = leading;
+        self.leading_trivia = leading_trivia;
     }
 
-    fn set_pending(&mut self, token: &ParserToken) {
+    fn buffer_token(&mut self, token: &ParserToken) {
         self.pending =
             Some(PendingToken { kind: token.kind, text_len: TextSize::of(token.raw.as_str()) });
     }
 
-    fn on_token(&mut self, out: &mut TreeBuilder, token: &ParserToken) {
+    fn handle_token(&mut self, builder: &mut TreeBuilder, token: &ParserToken) {
         if token.is_whitespace() || token.is_comment() {
             self.push_trivia(token);
             return;
         }
 
         if token.is_meta() {
-            self.flush_into(out);
-            self.emit_meta(out, token);
+            self.flush_pending_into(builder);
+            self.emit_meta_token(builder, token);
             return;
         }
 
-        self.flush_into(out);
-        self.set_pending(token);
+        self.flush_pending_into(builder);
+        self.buffer_token(token);
     }
 }
 
 impl<T> VecPool<T> {
-    fn new(pool_cap: usize, default_cap: usize) -> Self {
-        Self { pool: Vec::with_capacity(pool_cap), default_cap }
+    fn new(pool_cap: usize, default_capacity: usize) -> Self {
+        Self { pool: Vec::with_capacity(pool_cap), default_capacity }
     }
 
-    fn take(&mut self) -> Vec<T> {
-        self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.default_cap))
+    fn acquire(&mut self) -> Vec<T> {
+        self.pool.pop().unwrap_or_else(|| Vec::with_capacity(self.default_capacity))
     }
 
-    fn give(&mut self, mut vec: Vec<T>) {
+    fn release(&mut self, mut vec: Vec<T>) {
         vec.clear();
         self.pool.push(vec);
     }
 }
 
 pub struct TreeBuilder {
-    nodes: Vec<Node>,
-    node_children: Vec<NodeOrTokenRef>,
-    tokens: Vec<Token>,
+    nodes: Vec<NodeData>,
+    node_children: Vec<ElementId>,
+    tokens: Vec<TokenData>,
     text: String,
     unparsable_ranges: Vec<TextRange>,
 
-    node_children_pool: VecPool<NodeOrTokenRef>,
-    opened: Vec<Frame>,
+    node_children_pool: VecPool<ElementId>,
+    open_frames: Vec<OpenNodeFrame>,
     text_cursor: TextSize,
 
     trivia: TriviaState,
@@ -1180,46 +1192,49 @@ pub struct TreeBuilder {
 
 impl Drop for TreeBuilder {
     fn drop(&mut self) {
-        if !std::thread::panicking() && !self.opened.is_empty() {
+        if !std::thread::panicking() && !self.open_frames.is_empty() {
             panic!("you should call `TreeBuilder::finish()`");
         }
     }
 }
 
 const DEFAULT_TREE_DEPTH: usize = 128;
-const DEFAULT_CHILDREN_LEN: usize = 10;
-const MIN_TREE_CAP: usize = 16;
+const DEFAULT_CHILDREN_CAPACITY: usize = 10;
+const MIN_TREE_CAPACITY: usize = 16;
 
 impl TreeBuilder {
-    pub(crate) fn new_rootless_with_caps(source: impl Into<String>, token_cap: usize) -> Self {
+    pub(crate) fn new_rootless_with_token_capacity(
+        source: impl Into<String>,
+        token_cap: usize,
+    ) -> Self {
         Self::new_impl(source.into(), None, token_cap)
     }
 
     fn new_impl(text: String, root_kind: Option<SyntaxKind>, token_cap: usize) -> Self {
-        let tree_cap = token_cap.max(MIN_TREE_CAP);
+        let tree_cap = token_cap.max(MIN_TREE_CAPACITY);
         let mut nodes = Vec::with_capacity(tree_cap);
-        let mut node_children_pool = VecPool::new(DEFAULT_TREE_DEPTH, DEFAULT_CHILDREN_LEN);
-        let mut opened = Vec::with_capacity(DEFAULT_TREE_DEPTH);
+        let mut node_children_pool = VecPool::new(DEFAULT_TREE_DEPTH, DEFAULT_CHILDREN_CAPACITY);
+        let mut open_frames = Vec::with_capacity(DEFAULT_TREE_DEPTH);
         if let Some(kind) = root_kind {
-            nodes.push(Node {
-                parent: None,
+            nodes.push(NodeData {
+                parent_id: None,
                 kind,
-                children: 0..0,
-                first_token: TokenId(0),
-                last_token: TokenId(0),
+                child_range: 0..0,
+                first_token_id: TokenId(0),
+                last_token_id: TokenId(0),
             });
-            opened.push(Frame {
-                id: NodeId(0),
-                children: node_children_pool.take(),
-                token_range: None,
+            open_frames.push(OpenNodeFrame {
+                node_id: NodeId(0),
+                children: node_children_pool.acquire(),
+                token_bounds: None,
             });
         }
         let mut tokens = Vec::with_capacity(tree_cap);
-        tokens.push(Token {
+        tokens.push(TokenData {
             kind: SyntaxKind::EndOfFile,
-            attached_trivia: AttachedTrivia::new(false, false, 0),
+            trivia: TriviaAttachment::new(false, false, 0),
             end: TextSize::new(0),
-            parent: NodeId(0),
+            parent_id: NodeId(0),
         });
         Self {
             nodes,
@@ -1229,7 +1244,7 @@ impl TreeBuilder {
             unparsable_ranges: Vec::new(),
 
             node_children_pool,
-            opened,
+            open_frames,
             text_cursor: TextSize::new(0),
 
             trivia: TriviaState::new(),
@@ -1239,7 +1254,7 @@ impl TreeBuilder {
     #[allow(dead_code)]
     pub(crate) fn abandon(&mut self) {
         self.trivia.abandon();
-        self.opened.clear();
+        self.open_frames.clear();
     }
 
     fn with_trivia<F>(&mut self, f: F)
@@ -1252,28 +1267,28 @@ impl TreeBuilder {
     }
 
     fn flush_pending(&mut self) {
-        self.with_trivia(|trivia, builder| trivia.flush_into(builder));
+        self.with_trivia(|trivia, builder| trivia.flush_pending_into(builder));
     }
 
-    fn last_opened(&self) -> &Frame {
-        self.opened.last().expect("no opened nodes?")
+    fn current_frame(&self) -> &OpenNodeFrame {
+        self.open_frames.last().expect("no opened nodes?")
     }
 
-    fn last_opened_mut(&mut self) -> &mut Frame {
-        self.opened.last_mut().expect("no opened nodes?")
+    fn current_frame_mut(&mut self) -> &mut OpenNodeFrame {
+        self.open_frames.last_mut().expect("no opened nodes?")
     }
 
     #[inline]
-    fn bump_range(dst: &mut Option<(TokenId, TokenId)>, new: (TokenId, TokenId)) {
+    fn extend_token_bounds(dst: &mut Option<(TokenId, TokenId)>, new_bounds: (TokenId, TokenId)) {
         match dst {
-            None => *dst = Some(new),
-            Some((_first, last)) => *last = new.1,
+            None => *dst = Some(new_bounds),
+            Some((_first_token_id, last_token_id)) => *last_token_id = new_bounds.1,
         }
     }
 
     #[inline]
-    fn last_opened_id(&self) -> NodeId {
-        self.last_opened().id
+    fn current_node_id(&self) -> NodeId {
+        self.current_frame().node_id
     }
 
     fn flush_children<T>(
@@ -1284,14 +1299,14 @@ impl TreeBuilder {
         let start = arena.len();
         arena.append(&mut children);
         let end = arena.len();
-        pool.give(children);
+        pool.release(children);
         start..end
     }
 
-    fn close_node_frame(&mut self, id: NodeId, children: Vec<NodeOrTokenRef>) {
+    fn store_node_children(&mut self, node_id: NodeId, children: Vec<ElementId>) {
         let range =
             Self::flush_children(&mut self.node_children, &mut self.node_children_pool, children);
-        self.nodes[id.0].children = range;
+        self.nodes[node_id.0].child_range = range;
     }
 
     fn advance_text(&mut self, len: TextSize) -> TextSize {
@@ -1301,47 +1316,53 @@ impl TreeBuilder {
     }
 
     pub fn start_node(&mut self, kind: SyntaxKind) {
-        self.start_node_reserve(kind, 0);
+        self.start_node_with_capacity(kind, 0);
     }
 
-    pub fn start_node_reserve(&mut self, kind: SyntaxKind, estimated_children: usize) {
-        let parent = self.opened.last().map(|frame| frame.id);
-        let new_node = NodeId(self.nodes.len());
-        self.nodes.push(Node {
-            parent,
+    pub fn start_node_with_capacity(&mut self, kind: SyntaxKind, estimated_children: usize) {
+        let parent_id = self.open_frames.last().map(|frame| frame.node_id);
+        let node_id = NodeId(self.nodes.len());
+        self.nodes.push(NodeData {
+            parent_id,
             kind,
-            children: 0..0,
-            first_token: TokenId(0),
-            last_token: TokenId(0),
+            child_range: 0..0,
+            first_token_id: TokenId(0),
+            last_token_id: TokenId(0),
         });
-        if parent.is_some() {
-            self.push_child_node(new_node);
+        if parent_id.is_some() {
+            self.push_child_node(node_id);
         }
-        let mut children = self.node_children_pool.take();
+        let mut children = self.node_children_pool.acquire();
         children.reserve(estimated_children);
-        self.opened.push(Frame { id: new_node, children, token_range: None });
+        self.open_frames.push(OpenNodeFrame { node_id, children, token_bounds: None });
     }
 
-    fn close_top_frame(&mut self) {
-        let Frame { id, children, token_range } = self.opened.pop().expect("no opened nodes?");
-        let (first, last) = token_range.expect("node without tokens");
-        let kind = self.nodes[id.0].kind;
-        let node = &mut self.nodes[id.0];
-        node.first_token = first;
-        node.last_token = last;
-        self.close_node_frame(id, children);
+    fn finish_current_node(&mut self) {
+        let OpenNodeFrame { node_id, children, token_bounds } =
+            self.open_frames.pop().expect("no opened nodes?");
+        let (first_token_id, last_token_id) = token_bounds.expect("node without tokens");
+        let kind = self.nodes[node_id.0].kind;
+        let node_data = &mut self.nodes[node_id.0];
+        node_data.first_token_id = first_token_id;
+        node_data.last_token_id = last_token_id;
+        self.store_node_children(node_id, children);
         if kind == SyntaxKind::Unparsable {
-            debug_assert!(first.0 > 0, "real tokens should follow the sentinel EOF token");
-            self.unparsable_ranges
-                .push(TextRange::new(self.tokens[first.0 - 1].end, self.tokens[last.0].end));
+            debug_assert!(first_token_id.0 > 0, "real tokens should follow the sentinel EOF token");
+            self.unparsable_ranges.push(TextRange::new(
+                self.tokens[first_token_id.0 - 1].end,
+                self.tokens[last_token_id.0].end,
+            ));
         }
-        if let Some(parent) = self.opened.last_mut() {
-            Self::bump_range(&mut parent.token_range, (first, last));
+        if let Some(parent_frame) = self.open_frames.last_mut() {
+            Self::extend_token_bounds(
+                &mut parent_frame.token_bounds,
+                (first_token_id, last_token_id),
+            );
         }
     }
 
     pub fn finish_node(&mut self) {
-        self.close_top_frame();
+        self.finish_current_node();
     }
 
     pub fn emit_token_with_trivia(
@@ -1351,56 +1372,56 @@ impl TreeBuilder {
         token_len: TextSize,
         trailing_trivia: impl ExactSizeIterator<Item = (SyntaxKind, TextSize)>,
     ) {
-        let parent = self.last_opened_id();
-        let leading_trivia_len = leading_trivia.len();
-        let trailing_trivia_len = trailing_trivia.len();
-        self.tokens.reserve(leading_trivia_len + 1 + trailing_trivia_len);
+        let parent_id = self.current_node_id();
+        let leading_trivia_count = leading_trivia.len();
+        let trailing_trivia_count = trailing_trivia.len();
+        self.tokens.reserve(leading_trivia_count + 1 + trailing_trivia_count);
         let first_token_index = self.tokens.len();
         for (kind, text_len) in leading_trivia {
             let end = self.advance_text(text_len);
-            self.tokens.push(Token {
+            self.tokens.push(TokenData {
                 kind,
-                attached_trivia: AttachedTrivia::new(false, false, 0),
+                trivia: TriviaAttachment::new(false, false, 0),
                 end,
-                parent,
+                parent_id,
             });
         }
-        let token = TokenId(self.tokens.len());
+        let token_id = TokenId(self.tokens.len());
         let token_end = self.advance_text(token_len);
-        self.tokens.push(Token {
+        self.tokens.push(TokenData {
             kind,
-            attached_trivia: AttachedTrivia::new(
-                leading_trivia_len != 0,
-                trailing_trivia_len != 0,
-                leading_trivia_len,
+            trivia: TriviaAttachment::new(
+                leading_trivia_count != 0,
+                trailing_trivia_count != 0,
+                leading_trivia_count,
             ),
             end: token_end,
-            parent,
+            parent_id,
         });
-        self.push_child_token(token);
+        self.push_child_token(token_id);
         for (kind, text_len) in trailing_trivia {
             let end = self.advance_text(text_len);
-            self.tokens.push(Token {
+            self.tokens.push(TokenData {
                 kind,
-                attached_trivia: AttachedTrivia::new(false, false, trailing_trivia_len),
+                trivia: TriviaAttachment::new(false, false, trailing_trivia_count),
                 end,
-                parent,
+                parent_id,
             });
         }
-        let last_token_index = first_token_index + leading_trivia_len + trailing_trivia_len;
-        let first_token = TokenId(first_token_index);
-        let last_token = TokenId(last_token_index);
+        let last_token_index = first_token_index + leading_trivia_count + trailing_trivia_count;
+        let first_token_id = TokenId(first_token_index);
+        let last_token_id = TokenId(last_token_index);
 
-        let emitted = (first_token, last_token);
-        Self::bump_range(&mut self.last_opened_mut().token_range, emitted);
+        let emitted_bounds = (first_token_id, last_token_id);
+        Self::extend_token_bounds(&mut self.current_frame_mut().token_bounds, emitted_bounds);
     }
 
-    fn push_child_node(&mut self, node: NodeId) {
-        self.last_opened_mut().children.push(NodeOrTokenRef::Node(node));
+    fn push_child_node(&mut self, node_id: NodeId) {
+        self.current_frame_mut().children.push(ElementId::Node(node_id));
     }
 
-    fn push_child_token(&mut self, token: TokenId) {
-        self.last_opened_mut().children.push(NodeOrTokenRef::Token(token));
+    fn push_child_token(&mut self, token_id: TokenId) {
+        self.current_frame_mut().children.push(ElementId::Token(token_id));
     }
 
     pub fn finish(self) -> SyntaxTree {
@@ -1417,33 +1438,33 @@ impl TreeBuilder {
         (SyntaxTree { tree }, unparsable_ranges)
     }
 
-    fn finish_impl(mut self) -> (Tree, Vec<TextRange>) {
-        match self.opened.len() {
+    fn finish_impl(mut self) -> (SharedTree, Vec<TextRange>) {
+        match self.open_frames.len() {
             0 => {
                 assert!(!self.nodes.is_empty(), "no root node");
             }
-            1 => self.close_top_frame(),
+            1 => self.finish_current_node(),
             _ => panic!("unbalanced nodes in TreeBuilder::finish()"),
         }
 
-        let tree = TreeInner {
+        let tree = TreeData {
             text: std::mem::take(&mut self.text),
             tokens: std::mem::take(&mut self.tokens),
-            nodes: Nodes {
+            node_store: NodeStore {
                 nodes: std::mem::take(&mut self.nodes),
                 node_children: std::mem::take(&mut self.node_children),
             },
         };
         let unparsable_ranges = std::mem::take(&mut self.unparsable_ranges);
-        self.opened.clear();
-        (Tree(Rc::new(tree)), unparsable_ranges)
+        self.open_frames.clear();
+        (SharedTree(Rc::new(tree)), unparsable_ranges)
     }
 }
 
 impl EventSink for TreeBuilder {
     fn enter_node(&mut self, kind: SyntaxKind, estimated_children: usize) {
         self.flush_pending();
-        self.start_node_reserve(kind, estimated_children);
+        self.start_node_with_capacity(kind, estimated_children);
     }
 
     fn exit_node(&mut self, _kind: SyntaxKind) {
@@ -1452,23 +1473,23 @@ impl EventSink for TreeBuilder {
     }
 
     fn token(&mut self, token: &ParserToken) {
-        self.with_trivia(|trivia, builder| trivia.on_token(builder, token));
+        self.with_trivia(|trivia, builder| trivia.handle_token(builder, token));
     }
 }
 
 #[derive(Debug)]
 pub enum ParseError {
-    UnknownDialect(DialectKind),
+    UnavailableDialect(DialectKind),
     Lex(Vec<SQLLexError>),
     Parse(SQLParseError),
-    Unparsable(Vec<TextRange>),
-    Panic(String),
+    UnparsableRanges(Vec<TextRange>),
+    ParserPanic(String),
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::UnknownDialect(kind) => {
+            ParseError::UnavailableDialect(kind) => {
                 write!(f, "dialect not available in sqruff-lib-dialects: {kind:?}")
             }
             ParseError::Lex(errors) => {
@@ -1482,14 +1503,14 @@ impl fmt::Display for ParseError {
                 Ok(())
             }
             ParseError::Parse(err) => write!(f, "parse error: {}", err.description),
-            ParseError::Unparsable(ranges) => {
+            ParseError::UnparsableRanges(ranges) => {
                 if ranges.len() == 1 {
                     write!(f, "unparsable section")
                 } else {
                     write!(f, "unparsable sections ({})", ranges.len())
                 }
             }
-            ParseError::Panic(message) => write!(f, "parser panicked: {message}"),
+            ParseError::ParserPanic(message) => write!(f, "parser panicked: {message}"),
         }
     }
 }
@@ -1498,7 +1519,8 @@ impl std::error::Error for ParseError {}
 
 pub fn parse(sql: impl Into<String>, dialect_kind: DialectKind) -> Result<SyntaxTree, ParseError> {
     let sql = sql.into();
-    let dialect = kind_to_dialect(&dialect_kind).ok_or(ParseError::UnknownDialect(dialect_kind))?;
+    let dialect =
+        kind_to_dialect(&dialect_kind).ok_or(ParseError::UnavailableDialect(dialect_kind))?;
     let lexer = Lexer::from(&dialect);
     let (tokens, lex_errors) = lexer.lex_str(&sql);
     if !lex_errors.is_empty() {
@@ -1506,13 +1528,14 @@ pub fn parse(sql: impl Into<String>, dialect_kind: DialectKind) -> Result<Syntax
     }
 
     let parser = Parser::from(&dialect);
-    let sink = TreeBuilder::new_rootless_with_caps(sql, tokens.len().saturating_add(1));
+    let tree_builder =
+        TreeBuilder::new_rootless_with_token_capacity(sql, tokens.len().saturating_add(1));
     let parse_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut sink = sink;
-        match parser.parse_with_sink(&tokens, &mut sink) {
-            Ok(()) => Ok(sink.finish_with_unparsable_ranges()),
+        let mut tree_builder = tree_builder;
+        match parser.parse_with_sink(&tokens, &mut tree_builder) {
+            Ok(()) => Ok(tree_builder.finish_with_unparsable_ranges()),
             Err(err) => {
-                sink.abandon();
+                tree_builder.abandon();
                 Err(err)
             }
         }
@@ -1522,11 +1545,11 @@ pub fn parse(sql: impl Into<String>, dialect_kind: DialectKind) -> Result<Syntax
             if ranges.is_empty() {
                 Ok(tree)
             } else {
-                Err(ParseError::Unparsable(ranges))
+                Err(ParseError::UnparsableRanges(ranges))
             }
         }
         Ok(Err(err)) => Err(ParseError::Parse(err)),
-        Err(panic) => Err(ParseError::Panic(panic_message(panic))),
+        Err(panic) => Err(ParseError::ParserPanic(panic_message(panic))),
     }
 }
 
@@ -1718,14 +1741,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_returns_error_for_unknown_dialect_when_a_dialect_is_unavailable() {
+    fn parse_returns_error_for_unavailable_dialect_when_a_dialect_is_unavailable() {
         let Some(dialect) = unsupported_dialect() else {
             return;
         };
 
         let result = parse("SELECT 1", dialect);
-        let Err(ParseError::UnknownDialect(actual)) = result else {
-            panic!("expected unknown dialect parse error");
+        let Err(ParseError::UnavailableDialect(actual)) = result else {
+            panic!("expected unavailable dialect parse error");
         };
 
         assert_eq!(actual, dialect);
@@ -1748,7 +1771,7 @@ mod tests {
     #[test]
     fn parse_returns_unparsable_ranges_without_post_walk() {
         let result = parse("SELECT FROM foo", DialectKind::Ansi);
-        let Err(ParseError::Unparsable(ranges)) = result else {
+        let Err(ParseError::UnparsableRanges(ranges)) = result else {
             panic!("expected unparsable parse error");
         };
 
@@ -1770,11 +1793,11 @@ mod tests {
     fn large_trivia_groups_are_reported_as_parse_panics() {
         let sql = format!("{}SELECT 1", "/*x*/".repeat(usize::from(u16::MAX) + 1));
         let result = parse(sql, DialectKind::Ansi);
-        let Err(ParseError::Panic(message)) = result else {
+        let Err(ParseError::ParserPanic(message)) = result else {
             panic!("expected panic parse error for trivia overflow");
         };
 
-        assert!(message.contains("trivia_len must fit into u16"));
+        assert!(message.contains("trivia_count must fit into u16"));
     }
 
     #[test]
