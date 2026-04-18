@@ -66,13 +66,10 @@ struct LspCommand {
     config_overrides: ConfigOverrideArgs,
 }
 
-struct FormatArguments {
-    path: Option<PathBuf>,
-}
-
-struct CheckArguments {
-    path: Option<PathBuf>,
-    fix: bool,
+struct LoadedSource {
+    input: String,
+    config: tidysql_config::Config,
+    display_path: String,
 }
 
 struct ConfigArguments {
@@ -98,49 +95,27 @@ impl ConfigOverrides {
         }
 
         for lint_override in &self.lint_levels {
-            apply_lint_level(config, lint_override.lint, lint_override.level);
+            config.set_lint_level(lint_override.lint, lint_override.level);
         }
+    }
+
+    fn extend_lint_levels(
+        lint_levels: &mut Vec<LintLevelOverride>,
+        lints: Vec<tidysql_config::LintName>,
+        level: tidysql_config::Severity,
+    ) {
+        lint_levels.extend(lints.into_iter().map(|lint| LintLevelOverride { lint, level }));
     }
 }
 
 impl From<ConfigOverrideArgs> for ConfigOverrides {
     fn from(args: ConfigOverrideArgs) -> Self {
         let mut lint_levels = Vec::new();
-        lint_levels.extend(
-            args.allow
-                .into_iter()
-                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Allow }),
-        );
-        lint_levels.extend(
-            args.warn
-                .into_iter()
-                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Warn }),
-        );
-        lint_levels.extend(
-            args.deny
-                .into_iter()
-                .map(|lint| LintLevelOverride { lint, level: tidysql_config::Severity::Error }),
-        );
+        Self::extend_lint_levels(&mut lint_levels, args.allow, tidysql_config::Severity::Allow);
+        Self::extend_lint_levels(&mut lint_levels, args.warn, tidysql_config::Severity::Warn);
+        Self::extend_lint_levels(&mut lint_levels, args.deny, tidysql_config::Severity::Error);
 
         Self { dialect: args.dialect, lint_levels }
-    }
-}
-
-fn apply_lint_level(
-    config: &mut tidysql_config::Config,
-    lint: tidysql_config::LintName,
-    level: tidysql_config::Severity,
-) {
-    match lint {
-        tidysql_config::LintName::DisallowNames => {
-            config.lints.disallow_names.level = level;
-        }
-        tidysql_config::LintName::ExplicitUnion => {
-            config.lints.explicit_union.level = level;
-        }
-        tidysql_config::LintName::KeywordCase => {
-            config.lints.keyword_case.level = level;
-        }
     }
 }
 
@@ -157,22 +132,11 @@ impl ConfigArguments {
     }
 }
 
-impl FormatCommand {
-    fn partition(self, global_options: GlobalConfigArgs) -> (FormatArguments, ConfigArguments) {
-        let cli = FormatArguments { path: self.path };
-        let overrides = ConfigOverrides::from(self.config_overrides);
-        let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
-        (cli, config_arguments)
-    }
-}
-
-impl CheckCommand {
-    fn partition(self, global_options: GlobalConfigArgs) -> (CheckArguments, ConfigArguments) {
-        let cli = CheckArguments { path: self.path, fix: self.fix };
-        let overrides = ConfigOverrides::from(self.config_overrides);
-        let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
-        (cli, config_arguments)
-    }
+fn config_arguments(
+    global_options: GlobalConfigArgs,
+    config_overrides: ConfigOverrideArgs,
+) -> ConfigArguments {
+    ConfigArguments::from_cli_arguments(global_options, config_overrides.into())
 }
 
 fn main() {
@@ -191,46 +155,50 @@ fn main() {
 }
 
 fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
-    let (cli, config_arguments) = args.partition(global_options);
-    let input = read_input(cli.path.as_deref()).map_err(|err| err.to_string())?;
-    let source_path = cli.path.as_deref().unwrap_or_else(|| Path::new("."));
-    let config = config_arguments.load_config(source_path)?;
+    let FormatCommand { path, config_overrides } = args;
+    let config_arguments = config_arguments(global_options, config_overrides);
+    let LoadedSource { input, config, .. } = load_source(path.as_deref(), &config_arguments)?;
 
     let formatted = tidysql::format_with_config(&input, &config).map_err(|err| err.to_string())?;
     write_output(&formatted).map_err(|err| err.to_string())
 }
 
 fn check(args: CheckCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
-    let (cli, config_arguments) = args.partition(global_options);
-    let input = read_input(cli.path.as_deref()).map_err(|err| err.to_string())?;
-    let source_path = cli.path.as_deref().unwrap_or_else(|| Path::new("."));
-    let config = config_arguments.load_config(source_path)?;
-    let display_path = cli
-        .path
-        .as_deref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "<stdin>".to_string());
+    let CheckCommand { path, config_overrides, fix } = args;
+    let config_arguments = config_arguments(global_options, config_overrides);
+    let LoadedSource { input, config, display_path } =
+        load_source(path.as_deref(), &config_arguments)?;
 
-    if cli.fix {
+    let checked_source = if fix {
         let fixed = tidysql::fix_with_config(&input, &config).map_err(|err| err.to_string())?;
-        match cli.path.as_deref() {
+        match path.as_deref() {
             Some(path) => atomic_write(path, &fixed).map_err(|err| err.to_string())?,
             None => write_output(&fixed).map_err(|err| err.to_string())?,
         }
-        let diagnostics = tidysql::check_with_config(&fixed, &config);
-        emit_diagnostics(&display_path, &fixed, &diagnostics);
-        return check_diagnostics(&diagnostics);
-    }
+        fixed
+    } else {
+        input
+    };
 
-    let diagnostics = tidysql::check_with_config(&input, &config);
-    emit_diagnostics(&display_path, &input, &diagnostics);
+    let diagnostics = tidysql::check_with_config(&checked_source, &config);
+    emit_diagnostics(&display_path, &checked_source, &diagnostics);
     check_diagnostics(&diagnostics)
 }
 
 fn serve_lsp(args: LspCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
-    let overrides = ConfigOverrides::from(args.config_overrides);
-    let config_arguments = ConfigArguments::from_cli_arguments(global_options, overrides);
-    lsp::run(config_arguments)
+    lsp::run(config_arguments(global_options, args.config_overrides))
+}
+
+fn load_source(
+    path: Option<&Path>,
+    config_arguments: &ConfigArguments,
+) -> Result<LoadedSource, String> {
+    let input = read_input(path).map_err(|err| err.to_string())?;
+    let source_path = path.unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let display_path =
+        path.map_or_else(|| "<stdin>".to_string(), |path| path.display().to_string());
+    Ok(LoadedSource { input, config, display_path })
 }
 
 fn read_input(path: Option<&Path>) -> io::Result<String> {
@@ -259,7 +227,7 @@ fn write_output(output: &str) -> io::Result<()> {
 fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    io::Write::write_all(&mut tmp, content.as_bytes())?;
+    tmp.write_all(content.as_bytes())?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }

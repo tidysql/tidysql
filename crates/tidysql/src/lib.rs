@@ -16,6 +16,18 @@ pub enum FixError {
     Apply(EditError),
 }
 
+impl From<ParseError> for FixError {
+    fn from(error: ParseError) -> Self {
+        Self::Parse(error)
+    }
+}
+
+impl From<EditError> for FixError {
+    fn from(error: EditError) -> Self {
+        Self::Apply(error)
+    }
+}
+
 impl fmt::Display for FixError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -53,7 +65,7 @@ pub fn format_with_config(
 
 pub fn fix_with_config(source: &str, config: &tidysql_config::Config) -> Result<String, FixError> {
     let dialect = config_dialect(config);
-    let tree = tidysql_syntax::parse(source, dialect).map_err(FixError::Parse)?;
+    let tree = tidysql_syntax::parse(source, dialect)?;
     let diagnostics = tidysql_lints::run(dialect, &tree, config);
     let edits = collect_fixes(&diagnostics);
 
@@ -61,19 +73,15 @@ pub fn fix_with_config(source: &str, config: &tidysql_config::Config) -> Result<
         return Ok(source.to_string());
     }
 
-    tidysql_syntax::apply_edits(source, edits).map_err(FixError::Apply)
+    Ok(tidysql_syntax::apply_edits(source, edits)?)
 }
 
 fn collect_fixes(diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
-    let mut edits = Vec::new();
-
-    for diagnostic in diagnostics {
-        if let Some(fix) = &diagnostic.fix {
-            edits.extend(fix.edits.iter().cloned());
-        }
-    }
-
-    edits
+    diagnostics
+        .iter()
+        .filter_map(|diagnostic| diagnostic.fix.as_ref())
+        .flat_map(|fix| fix.edits.iter().cloned())
+        .collect()
 }
 
 fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
@@ -99,7 +107,7 @@ fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {
             CODE_PARSE_ERROR,
             error.description,
             Severity::Error,
-            error.span.map(|span| span.source_range()).unwrap_or(0..0),
+            error.span.map_or(0..0, |span| span.source_range()),
         )],
         ParseError::UnparsableRanges(ranges) => ranges
             .into_iter()

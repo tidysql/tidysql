@@ -1,0 +1,29 @@
+[[case]]
+name = "not_equal_style_prefers_angle"
+sql = "SELECT * FROM foo WHERE a != b"
+config = { lints = { not_equal_style = { level = "warn", preferred = "angle" } } }
+expect = [{ code = "not_equal_style" }]
+fixed_sql = "SELECT * FROM foo WHERE a <> b"
+
+[[case]]
+name = "null_comparison_uses_is"
+sql = "SELECT * FROM foo WHERE a = NULL"
+expect = [{ code = "null_comparison" }]
+fixed_sql = "SELECT * FROM foo WHERE a IS NULL"
+
+[[case]]
+name = "count_rows_prefers_star"
+sql = "SELECT COUNT(1) FROM foo"
+expect = [{ code = "count_rows" }]
+fixed_sql = "SELECT COUNT(*) FROM foo"
+
+[[case]]
+name = "order_by_direction_requires_all_items"
+sql = "SELECT a, b FROM foo ORDER BY a, b DESC"
+expect = [{ code = "order_by_direction" }]
+fixed_sql = "SELECT a, b FROM foo ORDER BY a ASC, b DESC"
+
+[[case]]
+name = "require_order_by_for_limit"
+sql = "SELECT * FROM foo LIMIT 10"
+expect = [{ code = "require_order_by" }]

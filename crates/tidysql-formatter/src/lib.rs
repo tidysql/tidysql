@@ -17,7 +17,6 @@ impl fmt::Display for FormatError {
 
 impl std::error::Error for FormatError {}
 
-pub fn format_with_dialect(source: &str, _dialect: DialectKind) -> Result<String, FormatError> {
-    let _ = source;
+pub fn format_with_dialect(_source: &str, _dialect: DialectKind) -> Result<String, FormatError> {
     Err(FormatError::NotImplemented)
 }

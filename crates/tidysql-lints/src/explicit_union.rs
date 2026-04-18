@@ -2,14 +2,12 @@ use tidysql_syntax::{
     DialectKind, Fix, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextEdit,
 };
 
-use crate::{Diagnostic, LintContext, NodeLint, Severity};
+use crate::{Diagnostic, LintContext, NodePass, Severity};
 
 pub(crate) struct ExplicitUnion;
 
-impl NodeLint for ExplicitUnion {
+impl NodePass for ExplicitUnion {
     const CODE: &'static str = "explicit_union";
-    const MESSAGE: &'static str = "Use UNION DISTINCT or UNION ALL.";
-    const SEVERITY: Severity = Severity::Warn;
     const TARGET: SyntaxKind = SyntaxKind::SetOperator;
 
     fn level(config: &tidysql_config::Config) -> Severity {
@@ -30,7 +28,7 @@ impl NodeLint for ExplicitUnion {
         let severity = ctx.config.lints.explicit_union.level;
         let mut diagnostic = Diagnostic::from_text_range(
             Self::CODE,
-            Self::MESSAGE,
+            "Use UNION DISTINCT or UNION ALL.",
             severity,
             union_token.text_range(),
         );

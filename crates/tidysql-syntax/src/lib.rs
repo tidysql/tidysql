@@ -245,8 +245,6 @@ pub(crate) struct NodeStore {
     pub(crate) node_children: Vec<ElementId>,
 }
 
-impl NodeStore {}
-
 #[derive(GetSize)]
 pub(crate) struct NodeData {
     pub(crate) parent_id: Option<NodeId>,
@@ -356,22 +354,15 @@ pub(crate) struct TreeData {
     pub(crate) node_store: NodeStore,
 }
 
-#[derive(GetSize)]
+#[derive(Clone, GetSize)]
 pub struct SyntaxTree {
     pub(crate) tree: SharedTree,
-}
-
-impl Clone for SyntaxTree {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self { tree: self.tree.clone() }
-    }
 }
 
 impl SyntaxTree {
     #[inline]
     pub fn root(&self) -> SyntaxNode {
-        SyntaxNode { tree: self.tree.clone(), node_id: NodeId(0) }
+        syntax_node(&self.tree, NodeId(0))
     }
 
     #[inline]
@@ -409,12 +400,12 @@ impl SyntaxToken {
 
     #[inline]
     pub fn prev_token(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), token_id: self.token_id.prev_token()? })
+        Some(syntax_token(&self.tree, self.token_id.prev_token()?))
     }
 
     #[inline]
     pub fn next_token(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), token_id: self.token_id.next_token(&self.tree.0)? })
+        Some(syntax_token(&self.tree, self.token_id.next_token(&self.tree.0)?))
     }
 
     #[inline]
@@ -447,7 +438,7 @@ impl SyntaxToken {
 
     #[inline]
     pub fn parent(&self) -> SyntaxNode {
-        SyntaxNode { tree: self.tree.clone(), node_id: self.token_id.parent(&self.tree.0) }
+        syntax_node(&self.tree, self.token_id.parent(&self.tree.0))
     }
 
     #[inline]
@@ -467,7 +458,7 @@ impl Iterator for TriviaIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        Some(SyntaxToken { tree: self.tree.clone(), token_id: self.tokens.next()? })
+        Some(syntax_token(&self.tree, self.tokens.next()?))
     }
 
     #[inline]
@@ -488,7 +479,7 @@ impl Iterator for TriviaIter {
 impl DoubleEndedIterator for TriviaIter {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        Some(SyntaxToken { tree: self.tree.clone(), token_id: self.tokens.next_back()? })
+        Some(syntax_token(&self.tree, self.tokens.next_back()?))
     }
 }
 
@@ -580,15 +571,12 @@ impl SyntaxNode {
 
     #[inline]
     pub fn first_token(&self) -> SyntaxToken {
-        SyntaxToken {
-            tree: self.tree.clone(),
-            token_id: self.node_data().first_token(&self.tree.0),
-        }
+        syntax_token(&self.tree, self.node_data().first_token(&self.tree.0))
     }
 
     #[inline]
     pub fn last_token(&self) -> SyntaxToken {
-        SyntaxToken { tree: self.tree.clone(), token_id: self.node_data().last_token(&self.tree.0) }
+        syntax_token(&self.tree, self.node_data().last_token(&self.tree.0))
     }
 
     #[inline]
@@ -603,15 +591,12 @@ impl SyntaxNode {
 
     #[inline]
     pub fn parent(&self) -> Option<Self> {
-        Some(Self { tree: self.tree.clone(), node_id: self.node_data().parent()? })
+        Some(syntax_node(&self.tree, self.node_data().parent()?))
     }
 
     #[inline]
     pub fn try_token_child(&self, index: usize) -> Option<SyntaxToken> {
-        match *self.node_data().children(&self.tree.0).get(index)? {
-            ElementId::Token(token_id) => Some(SyntaxToken { tree: self.tree.clone(), token_id }),
-            ElementId::Node(_) => None,
-        }
+        self.try_child(index).and_then(SyntaxElement::into_token)
     }
 
     #[inline]
@@ -625,10 +610,7 @@ impl SyntaxNode {
 
     #[inline]
     pub fn try_node_child(&self, index: usize) -> Option<SyntaxNode> {
-        match *self.node_data().children(&self.tree.0).get(index)? {
-            ElementId::Node(node_id) => Some(SyntaxNode { tree: self.tree.clone(), node_id }),
-            ElementId::Token(_) => None,
-        }
+        self.try_child(index).and_then(SyntaxElement::into_node)
     }
 
     #[inline]
@@ -702,11 +684,11 @@ impl SyntaxNode {
         match self.node_data().token_at_offset(&self.tree.0, offset) {
             TokenAtOffset::None => TokenAtOffset::None,
             TokenAtOffset::Single(token_id) => {
-                TokenAtOffset::Single(SyntaxToken { tree: self.tree.clone(), token_id })
+                TokenAtOffset::Single(syntax_token(&self.tree, token_id))
             }
             TokenAtOffset::Between(left, right) => TokenAtOffset::Between(
-                SyntaxToken { tree: self.tree.clone(), token_id: left },
-                SyntaxToken { tree: self.tree.clone(), token_id: right },
+                syntax_token(&self.tree, left),
+                syntax_token(&self.tree, right),
             ),
         }
     }
@@ -718,12 +700,20 @@ impl SyntaxNode {
 }
 
 #[inline]
+fn syntax_node(tree: &SharedTree, node_id: NodeId) -> SyntaxNode {
+    SyntaxNode { tree: tree.clone(), node_id }
+}
+
+#[inline]
+fn syntax_token(tree: &SharedTree, token_id: TokenId) -> SyntaxToken {
+    SyntaxToken { tree: tree.clone(), token_id }
+}
+
+#[inline]
 fn resolve_element_id(tree: &SharedTree, child: ElementId) -> SyntaxElement {
     match child {
-        ElementId::Token(token_id) => {
-            SyntaxElement::Token(SyntaxToken { tree: tree.clone(), token_id })
-        }
-        ElementId::Node(node_id) => SyntaxElement::Node(SyntaxNode { tree: tree.clone(), node_id }),
+        ElementId::Token(token_id) => SyntaxElement::Token(syntax_token(tree, token_id)),
+        ElementId::Node(node_id) => SyntaxElement::Node(syntax_node(tree, node_id)),
     }
 }
 
@@ -798,18 +788,12 @@ pub struct Children {
 impl Children {
     #[inline]
     fn filter_child(child: SyntaxElement) -> Option<SyntaxNode> {
-        match child {
-            SyntaxElement::Node(node) => Some(node),
-            SyntaxElement::Token(_) => None,
-        }
+        child.into_node()
     }
 
     #[inline]
     fn into_nodes(self) -> impl Iterator<Item = SyntaxNode> {
-        self.inner.filter_map(|child| match child {
-            SyntaxElement::Node(node) => Some(node),
-            SyntaxElement::Token(_) => None,
-        })
+        self.inner.filter_map(SyntaxElement::into_node)
     }
 }
 
@@ -1721,6 +1705,26 @@ mod tests {
         let actual: Vec<_> = tokens.map(|token| token.text().to_string()).collect();
         let expected: Vec<_> = expected.iter().map(|text| (*text).to_string()).collect();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn child_accessors_filter_nodes_and_tokens() {
+        let tree = parse_ok("SELECT sum(foo) FROM bar");
+        let bracketed = tree
+            .root()
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::Bracketed)
+            .expect("expected a bracketed expression");
+        let child_count = bracketed.children_with_tokens().len();
+        let token_index = (0..child_count)
+            .find(|&index| bracketed.try_token_child(index).is_some())
+            .expect("expected at least one token child");
+        let node_index = (0..child_count)
+            .find(|&index| bracketed.try_node_child(index).is_some())
+            .expect("expected at least one node child");
+
+        assert!(bracketed.try_node_child(token_index).is_none());
+        assert!(bracketed.try_token_child(node_index).is_none());
     }
 
     fn assert_token_kinds(tokens: TokenAtOffset, expected: &[SyntaxKind]) {

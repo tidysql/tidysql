@@ -10,7 +10,7 @@ struct MonacoPosition {
 #[derive(Serialize)]
 struct MonacoDiagnostic {
     message: String,
-    severity: String,
+    severity: &'static str,
     start: MonacoPosition,
     end: MonacoPosition,
     source: &'static str,
@@ -23,40 +23,23 @@ struct DialectInfo {
 }
 
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct Workspace;
 
 #[wasm_bindgen]
 impl Workspace {
-    #[allow(clippy::new_without_default)]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Workspace {
-        Workspace
+        Self
     }
 
     pub fn check_with_config(&self, source: &str, config_toml: &str) -> Result<JsValue, JsValue> {
-        let config = match tidysql_config::Config::from_toml_str(config_toml) {
-            Ok(config) => config,
-            Err(error) => {
-                let range = config_error_range(&error);
-                let message = config_error_message(&error);
-                let diagnostics = vec![MonacoDiagnostic {
-                    message,
-                    severity: map_severity(tidysql::Severity::Error),
-                    start: utf16_position(config_toml, range.start),
-                    end: utf16_position(config_toml, range.end),
-                    source: "config",
-                }];
-
-                return serde_wasm_bindgen::to_value(&diagnostics)
-                    .map_err(|error| JsValue::from_str(&error.to_string()));
-            }
-        };
+        let config = parse_config(config_toml)?;
 
         let diagnostics =
             to_monaco_diagnostics(source, tidysql::check_with_config(source, &config), "sql");
 
-        serde_wasm_bindgen::to_value(&diagnostics)
-            .map_err(|error| JsValue::from_str(&error.to_string()))
+        to_js_value(&diagnostics)
     }
 
     pub fn dialects(&self) -> Result<JsValue, JsValue> {
@@ -65,29 +48,11 @@ impl Workspace {
             .map(|dialect| DialectInfo { id: dialect.as_str(), label: dialect.label() })
             .collect::<Vec<_>>();
 
-        serde_wasm_bindgen::to_value(&dialects)
-            .map_err(|error| JsValue::from_str(&error.to_string()))
+        to_js_value(&dialects)
     }
 
     pub fn format_with_config(&self, source: &str, config_toml: &str) -> Result<String, JsValue> {
-        let config = match tidysql_config::Config::from_toml_str(config_toml) {
-            Ok(config) => config,
-            Err(error) => {
-                let range = config_error_range(&error);
-                let message = config_error_message(&error);
-                let diagnostics = vec![MonacoDiagnostic {
-                    message,
-                    severity: map_severity(tidysql::Severity::Error),
-                    start: utf16_position(config_toml, range.start),
-                    end: utf16_position(config_toml, range.end),
-                    source: "config",
-                }];
-
-                let value = serde_wasm_bindgen::to_value(&diagnostics)
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                return Err(value);
-            }
-        };
+        let config = parse_config(config_toml)?;
 
         let formatted = tidysql::format_with_config(source, &config)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -95,36 +60,41 @@ impl Workspace {
     }
 
     pub fn fix_with_config(&self, source: &str, config_toml: &str) -> Result<String, JsValue> {
-        let config = match tidysql_config::Config::from_toml_str(config_toml) {
-            Ok(config) => config,
-            Err(error) => {
-                let range = config_error_range(&error);
-                let message = config_error_message(&error);
-                let diagnostics = vec![MonacoDiagnostic {
-                    message,
-                    severity: map_severity(tidysql::Severity::Error),
-                    start: utf16_position(config_toml, range.start),
-                    end: utf16_position(config_toml, range.end),
-                    source: "config",
-                }];
-
-                let value = serde_wasm_bindgen::to_value(&diagnostics)
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                return Err(value);
-            }
-        };
+        let config = parse_config(config_toml)?;
 
         tidysql::fix_with_config(source, &config)
             .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 }
 
-fn map_severity(severity: tidysql::Severity) -> String {
+fn parse_config(config_toml: &str) -> Result<tidysql_config::Config, JsValue> {
+    tidysql_config::Config::from_toml_str(config_toml)
+        .map_err(|error| config_error_value(config_toml, &error))
+}
+
+fn config_error_value(config_toml: &str, error: &tidysql_config::ConfigError) -> JsValue {
+    let range = config_error_range(error);
+    let diagnostics = [MonacoDiagnostic {
+        message: config_error_message(error),
+        severity: map_severity(tidysql::Severity::Error),
+        start: utf16_position(config_toml, range.start),
+        end: utf16_position(config_toml, range.end),
+        source: "config",
+    }];
+
+    to_js_value(&diagnostics).unwrap_or_else(|error| error)
+}
+
+fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(value).map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+fn map_severity(severity: tidysql::Severity) -> &'static str {
     match severity {
-        tidysql::Severity::Error => "error".to_string(),
-        tidysql::Severity::Warn => "warning".to_string(),
-        tidysql::Severity::Info => "info".to_string(),
-        tidysql::Severity::Hint => "hint".to_string(),
+        tidysql::Severity::Error => "error",
+        tidysql::Severity::Warn => "warning",
+        tidysql::Severity::Info => "info",
+        tidysql::Severity::Hint => "hint",
         tidysql::Severity::Allow => unreachable!("Allow diagnostics should be suppressed earlier"),
     }
 }

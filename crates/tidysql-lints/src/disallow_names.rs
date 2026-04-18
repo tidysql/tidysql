@@ -1,30 +1,15 @@
 use tidysql_syntax::{SyntaxKind, SyntaxToken};
 
-use crate::{Diagnostic, LintContext, Severity, TokenLint};
+use crate::identifier::{is_identifier_kind, strip_identifier_quotes};
+use crate::{Diagnostic, LintContext, Severity, TokenPass};
 
 pub(crate) struct DisallowNames;
 
-impl TokenLint for DisallowNames {
+impl TokenPass for DisallowNames {
     const CODE: &'static str = "disallow_names";
 
     fn matches(kind: SyntaxKind) -> bool {
-        matches!(
-            kind,
-            SyntaxKind::NakedIdentifier
-                | SyntaxKind::Identifier
-                | SyntaxKind::QuotedIdentifier
-                | SyntaxKind::NakedIdentifierAll
-                | SyntaxKind::FunctionNameIdentifier
-                | SyntaxKind::PropertyNameIdentifier
-                | SyntaxKind::PropertiesNakedIdentifier
-                | SyntaxKind::DataTypeIdentifier
-                | SyntaxKind::DatetimeTypeIdentifier
-                | SyntaxKind::WildcardIdentifier
-                | SyntaxKind::WidgetNameIdentifier
-                | SyntaxKind::VersionIdentifier
-                | SyntaxKind::ProcedureNameIdentifier
-                | SyntaxKind::ColumnIndexIdentifierSegment
-        )
+        is_identifier_kind(kind)
     }
 
     fn level(config: &tidysql_config::Config) -> Severity {
@@ -58,17 +43,4 @@ impl TokenLint for DisallowNames {
             token.text_range(),
         ));
     }
-}
-
-fn strip_identifier_quotes(text: &str) -> &str {
-    if text.len() < 2 {
-        return text;
-    }
-
-    let bytes = text.as_bytes();
-    let last = bytes.len() - 1;
-
-    let strip = matches!((bytes[0], bytes[last]), (b'"', b'"') | (b'`', b'`') | (b'[', b']'));
-
-    if strip { &text[1..last] } else { text }
 }

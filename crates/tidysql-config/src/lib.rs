@@ -10,6 +10,80 @@ use serde_untagged::UntaggedEnumVisitor;
 
 pub const DEFAULT_CONFIG_FILE: &str = "tidysql.toml";
 
+fn expected_values<T>(values: &[T], as_str: impl Fn(&T) -> &'static str) -> String {
+    let mut expected = String::new();
+
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            expected.push_str(", ");
+        }
+        expected.push_str(as_str(value));
+    }
+
+    expected
+}
+
+fn find_named_value<T: Copy>(
+    values: &[T],
+    normalized: &str,
+    as_str: impl Fn(&T) -> &'static str,
+) -> Option<T> {
+    values.iter().find(|value| normalized == as_str(value)).copied()
+}
+
+fn deserialize_regexes<'de, D>(deserializer: D, path: &'static str) -> Result<Vec<Regex>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct RegexesVisitor {
+        path: &'static str,
+    }
+
+    impl<'de> Visitor<'de> for RegexesVisitor {
+        type Value = Vec<Regex>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a list of regex patterns")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut compiled = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            let mut index = 0;
+
+            while let Some(pattern) = seq.next_element::<Cow<'de, str>>()? {
+                match Regex::new(pattern.as_ref()) {
+                    Ok(regex) => compiled.push(regex),
+                    Err(error) => {
+                        return Err(DeError::custom(format!(
+                            "invalid {}[{index}] (`{pattern}`): {error}",
+                            self.path
+                        )));
+                    }
+                }
+                index += 1;
+            }
+
+            Ok(compiled)
+        }
+    }
+
+    deserializer.deserialize_seq(RegexesVisitor { path })
+}
+
+fn serialize_regexes<S>(regexes: &[Regex], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut seq = serializer.serialize_seq(Some(regexes.len()))?;
+    for regex in regexes {
+        seq.serialize_element(regex.as_str())?;
+    }
+    seq.end()
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Dialect {
@@ -77,14 +151,7 @@ pub struct DialectParseError {
 
 impl fmt::Display for DialectParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut expected = String::new();
-        for (index, dialect) in DIALECTS.iter().enumerate() {
-            if index > 0 {
-                expected.push_str(", ");
-            }
-            expected.push_str(dialect.as_str());
-        }
-
+        let expected = expected_values(DIALECTS, Dialect::as_str);
         write!(f, "invalid dialect '{}', expected one of: {expected}", self.input)
     }
 }
@@ -96,10 +163,7 @@ impl std::str::FromStr for Dialect {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let normalized = input.to_ascii_lowercase();
-        DIALECTS
-            .iter()
-            .copied()
-            .find(|dialect| normalized == dialect.as_str())
+        find_named_value(DIALECTS, &normalized, Dialect::as_str)
             .ok_or_else(|| DialectParseError { input: input.to_string() })
     }
 }
@@ -123,23 +187,77 @@ pub const DIALECTS: &[Dialect] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintName {
+    ConsecutiveSemicolons,
+    ConstantExpression,
+    CountRows,
     DisallowNames,
+    DistinctParentheses,
+    ElseNull,
     ExplicitUnion,
+    IdentifierCharacters,
+    KeywordIdentifier,
     KeywordCase,
+    NotEqualStyle,
+    NullComparison,
+    OrderByDirection,
+    RequireOrderBy,
+    SelfAliasColumn,
+    SimpleCase,
+    UniqueColumnAlias,
+    UniqueTableAlias,
+    UnusedCte,
+    UnusedTableAlias,
 }
 
 impl LintName {
     pub const fn as_str(&self) -> &'static str {
         match self {
+            LintName::ConsecutiveSemicolons => "consecutive_semicolons",
+            LintName::ConstantExpression => "constant_expression",
+            LintName::CountRows => "count_rows",
             LintName::DisallowNames => "disallow_names",
+            LintName::DistinctParentheses => "distinct_parentheses",
+            LintName::ElseNull => "else_null",
             LintName::ExplicitUnion => "explicit_union",
+            LintName::IdentifierCharacters => "identifier_characters",
+            LintName::KeywordIdentifier => "keyword_identifier",
             LintName::KeywordCase => "keyword_case",
+            LintName::NotEqualStyle => "not_equal_style",
+            LintName::NullComparison => "null_comparison",
+            LintName::OrderByDirection => "order_by_direction",
+            LintName::RequireOrderBy => "require_order_by",
+            LintName::SelfAliasColumn => "self_alias_column",
+            LintName::SimpleCase => "simple_case",
+            LintName::UniqueColumnAlias => "unique_column_alias",
+            LintName::UniqueTableAlias => "unique_table_alias",
+            LintName::UnusedCte => "unused_cte",
+            LintName::UnusedTableAlias => "unused_table_alias",
         }
     }
 }
 
-pub const LINTS: &[LintName] =
-    &[LintName::DisallowNames, LintName::ExplicitUnion, LintName::KeywordCase];
+pub const LINTS: &[LintName] = &[
+    LintName::ConsecutiveSemicolons,
+    LintName::ConstantExpression,
+    LintName::CountRows,
+    LintName::DisallowNames,
+    LintName::DistinctParentheses,
+    LintName::ElseNull,
+    LintName::ExplicitUnion,
+    LintName::IdentifierCharacters,
+    LintName::KeywordIdentifier,
+    LintName::KeywordCase,
+    LintName::NotEqualStyle,
+    LintName::NullComparison,
+    LintName::OrderByDirection,
+    LintName::RequireOrderBy,
+    LintName::SelfAliasColumn,
+    LintName::SimpleCase,
+    LintName::UniqueColumnAlias,
+    LintName::UniqueTableAlias,
+    LintName::UnusedCte,
+    LintName::UnusedTableAlias,
+];
 
 #[derive(Debug, Clone)]
 pub struct LintNameParseError {
@@ -148,14 +266,7 @@ pub struct LintNameParseError {
 
 impl fmt::Display for LintNameParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut expected = String::new();
-        for (index, lint) in LINTS.iter().enumerate() {
-            if index > 0 {
-                expected.push_str(", ");
-            }
-            expected.push_str(lint.as_str());
-        }
-
+        let expected = expected_values(LINTS, LintName::as_str);
         write!(f, "invalid lint '{}', expected one of: {expected}", self.input)
     }
 }
@@ -167,10 +278,7 @@ impl std::str::FromStr for LintName {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let normalized = input.to_ascii_lowercase().replace('-', "_");
-        LINTS
-            .iter()
-            .copied()
-            .find(|lint| normalized == lint.as_str())
+        find_named_value(LINTS, &normalized, LintName::as_str)
             .ok_or_else(|| LintNameParseError { input: input.to_string() })
     }
 }
@@ -257,6 +365,24 @@ pub enum CapitalisationPolicy {
     Camel,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotEqualStyle {
+    #[default]
+    Consistent,
+    Angle,
+    Bang,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CountRowsStyle {
+    #[default]
+    Star,
+    One,
+    Zero,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeywordCaseConfig {
@@ -270,55 +396,32 @@ pub struct KeywordCaseConfig {
     pub ignore_words_regex: Vec<Regex>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConsecutiveSemicolonsConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConstantExpressionConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CountRowsConfig {
+    pub preferred: CountRowsStyle,
+}
+
 fn deserialize_ignore_words_regex<'de, D>(deserializer: D) -> Result<Vec<Regex>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    struct RegexesVisitor;
-
-    impl<'de> Visitor<'de> for RegexesVisitor {
-        type Value = Vec<Regex>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a list of regex patterns")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut compiled = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-            let mut index = 0;
-
-            while let Some(pattern) = seq.next_element::<Cow<'de, str>>()? {
-                match Regex::new(pattern.as_ref()) {
-                    Ok(regex) => compiled.push(regex),
-                    Err(error) => {
-                        return Err(DeError::custom(format!(
-                            "invalid lints.keyword_case.ignore_words_regex[{index}] \
-                             (`{pattern}`): {error}"
-                        )));
-                    }
-                }
-                index += 1;
-            }
-
-            Ok(compiled)
-        }
-    }
-
-    deserializer.deserialize_seq(RegexesVisitor)
+    deserialize_regexes(deserializer, "lints.keyword_case.ignore_words_regex")
 }
 
 fn serialize_ignore_words_regex<S>(regexes: &[Regex], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    let mut seq = serializer.serialize_seq(Some(regexes.len()))?;
-    for regex in regexes {
-        seq.serialize_element(regex.as_str())?;
-    }
-    seq.end()
+    serialize_regexes(regexes, serializer)
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -327,6 +430,14 @@ pub struct DisallowNamesConfig {
     #[serde(serialize_with = "serialize_disallow_name_regexes")]
     pub regexes: Vec<Regex>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DistinctParenthesesConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ElseNullConfig {}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -359,72 +470,124 @@ fn deserialize_disallow_name_regexes<'de, D>(deserializer: D) -> Result<Vec<Rege
 where
     D: Deserializer<'de>,
 {
-    struct RegexesVisitor;
-
-    impl<'de> Visitor<'de> for RegexesVisitor {
-        type Value = Vec<Regex>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a list of regex patterns")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut compiled = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-            let mut index = 0;
-
-            while let Some(pattern) = seq.next_element::<Cow<'de, str>>()? {
-                match Regex::new(pattern.as_ref()) {
-                    Ok(regex) => compiled.push(regex),
-                    Err(error) => {
-                        return Err(DeError::custom(format!(
-                            "invalid lints.disallow_names.regexes[{index}] (`{pattern}`): {error}"
-                        )));
-                    }
-                }
-                index += 1;
-            }
-
-            Ok(compiled)
-        }
-    }
-
-    deserializer.deserialize_seq(RegexesVisitor)
+    deserialize_regexes(deserializer, "lints.disallow_names.regexes")
 }
 
 fn serialize_disallow_name_regexes<S>(regexes: &[Regex], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    let mut seq = serializer.serialize_seq(Some(regexes.len()))?;
-    for regex in regexes {
-        seq.serialize_element(regex.as_str())?;
-    }
-    seq.end()
+    serialize_regexes(regexes, serializer)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Lints {
-    pub disallow_names: LintConfig<DisallowNamesConfig>,
-    pub explicit_union: LintConfig<ExplicitUnionConfig>,
-    pub keyword_case: LintConfig<KeywordCaseConfig>,
+macro_rules! define_lints {
+    ($( $field:ident : $config:ty => $name:ident ),+ $(,)?) => {
+        #[derive(Debug, Clone, Deserialize, Serialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct Lints {
+            $(pub $field: LintConfig<$config>,)+
+        }
+
+        impl Lints {
+            fn warn_defaults() -> Self {
+                Self {
+                    $($field: LintConfig::default(),)+
+                }
+            }
+
+            pub fn set_level(&mut self, lint: LintName, level: Severity) {
+                match lint {
+                    $(LintName::$name => self.$field.level = level,)+
+                }
+            }
+        }
+    };
+}
+
+define_lints! {
+    consecutive_semicolons: ConsecutiveSemicolonsConfig => ConsecutiveSemicolons,
+    constant_expression: ConstantExpressionConfig => ConstantExpression,
+    count_rows: CountRowsConfig => CountRows,
+    disallow_names: DisallowNamesConfig => DisallowNames,
+    distinct_parentheses: DistinctParenthesesConfig => DistinctParentheses,
+    else_null: ElseNullConfig => ElseNull,
+    explicit_union: ExplicitUnionConfig => ExplicitUnion,
+    identifier_characters: IdentifierCharactersConfig => IdentifierCharacters,
+    keyword_identifier: KeywordIdentifierConfig => KeywordIdentifier,
+    keyword_case: KeywordCaseConfig => KeywordCase,
+    not_equal_style: NotEqualStyleConfig => NotEqualStyle,
+    null_comparison: NullComparisonConfig => NullComparison,
+    order_by_direction: OrderByDirectionConfig => OrderByDirection,
+    require_order_by: RequireOrderByConfig => RequireOrderBy,
+    self_alias_column: SelfAliasColumnConfig => SelfAliasColumn,
+    simple_case: SimpleCaseConfig => SimpleCase,
+    unique_column_alias: UniqueColumnAliasConfig => UniqueColumnAlias,
+    unique_table_alias: UniqueTableAliasConfig => UniqueTableAlias,
+    unused_cte: UnusedCteConfig => UnusedCte,
+    unused_table_alias: UnusedTableAliasConfig => UnusedTableAlias,
 }
 
 impl Default for Lints {
     fn default() -> Self {
         Self {
-            disallow_names: LintConfig::default(),
-            explicit_union: LintConfig::default(),
-            keyword_case: LintConfig {
-                level: Severity::Allow,
-                options: KeywordCaseConfig::default(),
-            },
+            keyword_case: LintConfig { level: Severity::Allow, ..LintConfig::default() },
+            ..Self::warn_defaults()
         }
     }
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IdentifierCharactersConfig {
+    pub allow_space: bool,
+    pub additional_allowed_characters: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeywordIdentifierConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotEqualStyleConfig {
+    pub preferred: NotEqualStyle,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NullComparisonConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OrderByDirectionConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RequireOrderByConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SelfAliasColumnConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SimpleCaseConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UniqueColumnAliasConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UniqueTableAliasConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UnusedCteConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UnusedTableAliasConfig {}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -463,6 +626,10 @@ impl Config {
 
     pub fn from_toml_str(input: &str) -> Result<Self, ConfigError> {
         parse_config(input, None)
+    }
+
+    pub fn set_lint_level(&mut self, lint: LintName, level: Severity) {
+        self.lints.set_level(lint, level);
     }
 }
 
@@ -529,5 +696,51 @@ disallow_names = { level = "error", names = ["bar"] }
         )
         .unwrap();
         assert_eq!(config.lints.disallow_names.level, Severity::Error);
+    }
+
+    #[test]
+    fn dialect_from_str_is_case_insensitive() {
+        assert_eq!("PoStGrEs".parse::<Dialect>().unwrap(), Dialect::Postgres);
+    }
+
+    #[test]
+    fn lint_name_from_str_accepts_dashes() {
+        assert_eq!("unused-table-alias".parse::<LintName>().unwrap(), LintName::UnusedTableAlias);
+    }
+
+    #[test]
+    fn keyword_case_regex_error_reports_field_path() {
+        let error = Config::from_toml_str(
+            r#"
+[lints]
+keyword_case = { ignore_words_regex = ["("] }
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(
+            source.to_string().contains("invalid lints.keyword_case.ignore_words_regex[0] (`(`):")
+        );
+    }
+
+    #[test]
+    fn disallow_names_regex_error_reports_field_path() {
+        let error = Config::from_toml_str(
+            r#"
+[lints]
+disallow_names = { regexes = ["("] }
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("invalid lints.disallow_names.regexes[0] (`(`):"));
     }
 }
