@@ -60,22 +60,24 @@ const configureMonaco = (monaco: typeof import('monaco-editor')) => {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'keyword', foreground: 'A626A4', fontStyle: 'bold' },
-      { token: 'string', foreground: '50A14F' },
-      { token: 'comment', foreground: '94A3B8' },
-      { token: 'number', foreground: '4078F2' },
-      { token: 'type.identifier', foreground: '4078F2' },
+      { token: 'keyword', foreground: '7C3AED', fontStyle: 'bold' },
+      { token: 'string', foreground: '047857' },
+      { token: 'comment', foreground: '9CA3AF' },
+      { token: 'number', foreground: '2563EB' },
+      { token: 'type.identifier', foreground: '2563EB' },
+      { token: 'identifier', foreground: '111111' },
     ],
     colors: {
       'editor.background': '#ffffff',
-      'editor.foreground': '#0d121b',
-      'editorLineNumber.foreground': '#9aa3b2',
-      'editorCursor.foreground': '#135bec',
-      'editor.selectionBackground': '#135bec26',
-      'editor.inactiveSelectionBackground': '#135bec1a',
-      'editor.lineHighlightBackground': '#f5f7fb',
-      'editorIndentGuide.background': '#e7ebf3',
-      'editorIndentGuide.activeBackground': '#d2d8e4',
+      'editor.foreground': '#111111',
+      'editorLineNumber.foreground': '#a3a3a3',
+      'editorCursor.foreground': '#111111',
+      'editor.selectionBackground': '#dbeafe',
+      'editor.inactiveSelectionBackground': '#eff6ff',
+      'editor.lineHighlightBackground': '#ffffff',
+      'editorIndentGuide.background': '#e5e7eb',
+      'editorIndentGuide.activeBackground': '#d4d4d8',
+      'editorWhitespace.foreground': '#e5e7eb',
     },
   })
 }
@@ -435,11 +437,12 @@ function App() {
       hover: { enabled: true, above: false, sticky: true },
       renderLineHighlight: 'none' as const,
       scrollBeyondLastLine: false,
-      wordWrap: 'on' as const,
+      wordWrap: 'off' as const,
       automaticLayout: true,
       fontFamily: '"JetBrains Mono", monospace',
-      fontSize: 13,
-      lineHeight: 24,
+      fontSize: 15,
+      lineHeight: 32,
+      padding: { top: 24, bottom: 24 },
     }),
     [overlayRoot]
   )
@@ -447,22 +450,23 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="header-left">
-          <div className="brand">
-            <div className="brand-icon">
-              <span className="material-symbols-outlined" aria-hidden="true">
-                database
-              </span>
+        <div className="brand">
+          <h1 className="brand-name">TidySQL</h1>
+        </div>
+        <div className="header-right">
+          {activeLoadingLabel ? (
+            <div
+              className={`header-status${
+                workspaceStatus === 'error' ? ' header-status-error' : ''
+              }`}
+              aria-live="polite"
+            >
+              {activeLoadingLabel}
             </div>
-            <h1 className="brand-name">TidySQL</h1>
-          </div>
-          <div className="header-divider" />
+          ) : null}
           <div className="select-group">
-            <span className="material-symbols-outlined select-icon" aria-hidden="true">
-              tune
-            </span>
             <select
-              className="select-control"
+              className="control-select"
               value={dialectOptions.length && hasDialectOption ? dialect : ''}
               disabled={!dialectOptions.length}
               onChange={(event) => {
@@ -491,46 +495,37 @@ function App() {
                 </option>
               )}
             </select>
-            <span className="material-symbols-outlined select-caret" aria-hidden="true">
-              expand_more
-            </span>
+            <svg
+              aria-hidden="true"
+              className="select-caret"
+              viewBox="0 0 20 20"
+              fill="none"
+            >
+              <path
+                d="M5.5 7.5L10 12l4.5-4.5"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.7"
+              />
+            </svg>
           </div>
-          {activeLoadingLabel ? (
-            <div
-              className={`loading-pill${
-                workspaceStatus === 'error' ? ' loading-pill-error' : ''
-              }`}
-              aria-live="polite"
-            >
-              {showSpinner ? (
-                <span className="loading-spinner" aria-hidden="true" />
-              ) : null}
-              <span>{activeLoadingLabel}</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="header-right">
-          <div className="header-run">
-            <button
-              className="btn-ghost"
-              type="button"
-              onClick={handleFormat}
-              disabled={!wasmReady}
-            >
-              Format
-            </button>
-            <button
-              className="btn-primary"
-              type="button"
-              onClick={handleFixAll}
-              disabled={!wasmReady || sqlDiagnosticsCount === 0}
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                auto_fix
-              </span>
-              Fix All ({sqlDiagnosticsCount})
-            </button>
-          </div>
+          <button
+            className="control-button"
+            type="button"
+            onClick={handleFormat}
+            disabled={!wasmReady}
+          >
+            Format
+          </button>
+          <button
+            className="control-button control-button-accent"
+            type="button"
+            onClick={handleFixAll}
+            disabled={!wasmReady || sqlDiagnosticsCount === 0}
+          >
+            Fix All ({sqlDiagnosticsCount})
+          </button>
         </div>
       </header>
       <main className="app-main">
@@ -621,71 +616,57 @@ function App() {
               Issues <span className="issues-count">{diagnostics.length}</span>
             </h2>
           </div>
-          <div className="issues-body">
-            <div className="issue-list custom-scrollbar">
-              {workspaceError ? (
-                <div className="issue-empty issue-error" role="alert">
-                  <div className="issue-error-title">Parser failed to load.</div>
-                  <p className="issue-error-message">{workspaceError}</p>
-                  <button
-                    className="btn-ghost"
-                    type="button"
-                    onClick={() => window.location.reload()}
-                  >
-                    Reload
-                  </button>
-                </div>
-              ) : !wasmReady ? (
-                <div className="issue-empty">Initializing parser...</div>
-              ) : diagnostics.length === 0 ? (
-                <div className="issue-empty">No issues to display.</div>
-              ) : (
-                diagnostics.map((diagnostic, index) => {
-                  const severity =
-                    diagnostic.severity === 'error'
-                      ? 'error'
-                      : diagnostic.severity === 'warning'
-                      ? 'warning'
-                      : 'style'
-                  const iconName =
-                    severity === 'error'
-                      ? 'error'
-                      : severity === 'warning'
-                      ? 'warning'
-                      : 'info'
+          <div className="issue-list custom-scrollbar">
+            {workspaceError ? (
+              <div className="issue-empty issue-error" role="alert">
+                <div className="issue-error-title">Parser failed to load.</div>
+                <p className="issue-error-message">{workspaceError}</p>
+                <button
+                  className="control-button"
+                  type="button"
+                  onClick={() => window.location.reload()}
+                >
+                  Reload
+                </button>
+              </div>
+            ) : !wasmReady ? (
+              <div className="issue-empty">
+                {showSpinner ? 'Initializing parser...' : 'Loading workspace...'}
+              </div>
+            ) : diagnostics.length === 0 ? (
+              <div className="issue-empty">No issues to display.</div>
+            ) : (
+              diagnostics.map((diagnostic, index) => {
+                const severity =
+                  diagnostic.severity === 'error'
+                    ? 'error'
+                    : diagnostic.severity === 'warning'
+                    ? 'warning'
+                    : 'style'
 
-                  return (
-                    <div className={`issue-item issue-item-${severity}`} key={index}>
-                      <div className="issue-item-top">
-                        <div className="issue-meta">
-                          <span
-                            className={`material-symbols-outlined issue-icon issue-icon-${severity}`}
-                            aria-hidden="true"
-                          >
-                            {iconName}
-                          </span>
-                          <span
-                            className={`issue-code${
-                              severity === 'error'
-                                ? ' issue-code-error'
-                                : severity === 'warning'
-                                ? ' issue-code-warning'
-                                : ''
-                            }`}
-                          >
-                            PARSE
-                          </span>
-                          <span className="issue-line">
-                            Line {diagnostic.start.line}:{diagnostic.start.column}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="issue-title">{diagnostic.message}</p>
+                return (
+                  <div className={`issue-item issue-item-${severity}`} key={index}>
+                    <div className="issue-meta">
+                      <span
+                        className={`issue-badge${
+                          severity === 'error'
+                            ? ' issue-badge-error'
+                            : severity === 'warning'
+                            ? ' issue-badge-warning'
+                            : ''
+                        }`}
+                      >
+                        {diagnostic.severity}
+                      </span>
+                      <span className="issue-line">
+                        Line {diagnostic.start.line}:{diagnostic.start.column}
+                      </span>
                     </div>
-                  )
-                })
-              )}
-            </div>
+                    <p className="issue-title">{diagnostic.message}</p>
+                  </div>
+                )
+              })
+            )}
           </div>
         </aside>
       </main>

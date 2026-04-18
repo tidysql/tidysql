@@ -40,7 +40,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               <pre className="error-details">{this.state.errorMessage}</pre>
             ) : null}
             <button
-              className="btn-primary"
+              className="control-button"
               type="button"
               onClick={() => window.location.reload()}
             >
