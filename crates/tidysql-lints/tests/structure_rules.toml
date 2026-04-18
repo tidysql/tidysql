@@ -1,0 +1,33 @@
+[[case]]
+name = "distinct_parentheses"
+sql = "SELECT DISTINCT(a), b FROM foo"
+expect = [{ code = "distinct_parentheses" }]
+fixed_sql = "SELECT DISTINCT a, b FROM foo"
+
+[[case]]
+name = "else_null_is_redundant"
+sql = "SELECT CASE WHEN flag THEN 1 ELSE NULL END FROM foo"
+expect = [{ code = "else_null" }]
+fixed_sql = "SELECT CASE WHEN flag THEN 1 END FROM foo"
+
+[[case]]
+name = "simple_case_to_coalesce"
+sql = "SELECT CASE WHEN x IS NULL THEN 0 ELSE x END FROM foo"
+expect = [{ code = "simple_case" }]
+fixed_sql = "SELECT COALESCE(x, 0) FROM foo"
+
+[[case]]
+name = "constant_expression_self_compare"
+sql = "SELECT * FROM foo WHERE foo.id = foo.id"
+expect = [{ code = "constant_expression" }]
+
+[[case]]
+name = "unused_cte"
+sql = "WITH live AS (SELECT 1), dead AS (SELECT 2) SELECT * FROM live"
+expect = [{ code = "unused_cte" }]
+
+[[case]]
+name = "consecutive_semicolons"
+sql = "SELECT 1;;"
+expect = [{ code = "consecutive_semicolons" }]
+fixed_sql = "SELECT 1;"

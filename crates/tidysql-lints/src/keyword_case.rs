@@ -1,11 +1,11 @@
-use tidysql_config::CapitalisationPolicy;
-use tidysql_syntax::{Fix, SyntaxElement, SyntaxKind, SyntaxToken, TextEdit};
+use tidysql_syntax::{Fix, SyntaxKind, SyntaxToken, TextEdit};
 
-use crate::{Diagnostic, LintContext, Severity, TokenLint};
+use crate::casing::{apply_case, is_correct_case, policy_description, resolve_keyword_policy};
+use crate::{Diagnostic, LintContext, Severity, TokenPass};
 
 pub(crate) struct KeywordCase;
 
-impl TokenLint for KeywordCase {
+impl TokenPass for KeywordCase {
     const CODE: &'static str = "keyword_case";
 
     fn matches(kind: SyntaxKind) -> bool {
@@ -24,7 +24,7 @@ impl TokenLint for KeywordCase {
             return;
         }
 
-        let policy = resolve_policy(options.policy, ctx);
+        let policy = resolve_keyword_policy(options.policy, ctx, options);
         if is_correct_case(text, policy) {
             return;
         }
@@ -45,105 +45,7 @@ impl TokenLint for KeywordCase {
     }
 }
 
-fn policy_description(policy: CapitalisationPolicy) -> &'static str {
-    match policy {
-        CapitalisationPolicy::Consistent => "consistent",
-        CapitalisationPolicy::Upper => "uppercase",
-        CapitalisationPolicy::Lower | CapitalisationPolicy::Snake => "lowercase",
-        CapitalisationPolicy::Pascal | CapitalisationPolicy::Capitalise => "capitalised",
-        CapitalisationPolicy::Camel => "camelCase",
-    }
-}
-
 fn is_ignored(text: &str, options: &tidysql_config::KeywordCaseConfig) -> bool {
     options.ignore_words.iter().any(|w| w.eq_ignore_ascii_case(text))
         || options.ignore_words_regex.iter().any(|r| r.is_match(text))
-}
-
-fn resolve_policy(policy: CapitalisationPolicy, ctx: &LintContext<'_>) -> CapitalisationPolicy {
-    match policy {
-        CapitalisationPolicy::Consistent => {
-            if let Some(cached) = ctx.inferred_keyword_policy.get() {
-                return cached;
-            }
-            let inferred = infer_policy(ctx);
-            ctx.inferred_keyword_policy.set(Some(inferred));
-            inferred
-        }
-        other => other,
-    }
-}
-
-fn infer_policy(ctx: &LintContext<'_>) -> CapitalisationPolicy {
-    let options = &ctx.config.lints.keyword_case.options;
-    let (upper, lower) = ctx
-        .tree
-        .root()
-        .descendants_with_tokens()
-        .filter_map(|el| match el {
-            SyntaxElement::Token(t) if t.kind() == SyntaxKind::Keyword => Some(t),
-            _ => None,
-        })
-        .filter(|token| !is_ignored(token.text(), options))
-        .fold((0usize, 0usize), |(upper, lower), token| {
-            let text = token.text();
-            if is_all_upper(text) {
-                (upper + 1, lower)
-            } else if is_all_lower(text) {
-                (upper, lower + 1)
-            } else {
-                (upper, lower)
-            }
-        });
-
-    if upper >= lower { CapitalisationPolicy::Upper } else { CapitalisationPolicy::Lower }
-}
-
-fn is_correct_case(text: &str, policy: CapitalisationPolicy) -> bool {
-    match policy {
-        CapitalisationPolicy::Consistent => true,
-        CapitalisationPolicy::Upper => is_all_upper(text),
-        CapitalisationPolicy::Lower | CapitalisationPolicy::Snake | CapitalisationPolicy::Camel => {
-            is_all_lower(text)
-        }
-        CapitalisationPolicy::Pascal | CapitalisationPolicy::Capitalise => is_capitalised(text),
-    }
-}
-
-fn apply_case(text: &str, policy: CapitalisationPolicy) -> String {
-    match policy {
-        CapitalisationPolicy::Consistent => text.to_string(),
-        CapitalisationPolicy::Upper => text.to_ascii_uppercase(),
-        CapitalisationPolicy::Lower | CapitalisationPolicy::Snake | CapitalisationPolicy::Camel => {
-            text.to_ascii_lowercase()
-        }
-        CapitalisationPolicy::Pascal | CapitalisationPolicy::Capitalise => capitalise(text),
-    }
-}
-
-fn is_all_upper(text: &str) -> bool {
-    !text.bytes().any(|b| b.is_ascii_lowercase())
-}
-
-fn is_all_lower(text: &str) -> bool {
-    !text.bytes().any(|b| b.is_ascii_uppercase())
-}
-
-fn is_capitalised(text: &str) -> bool {
-    let mut bytes = text.bytes();
-    let first_ok = bytes.next().is_none_or(|b| b.is_ascii_uppercase());
-    let rest_ok = !bytes.any(|b| b.is_ascii_uppercase());
-    first_ok && rest_ok
-}
-
-fn capitalise(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut bytes = text.bytes();
-    if let Some(first) = bytes.next() {
-        result.push(first.to_ascii_uppercase() as char);
-    }
-    for b in bytes {
-        result.push(b.to_ascii_lowercase() as char);
-    }
-    result
 }

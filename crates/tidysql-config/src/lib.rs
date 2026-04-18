@@ -123,23 +123,77 @@ pub const DIALECTS: &[Dialect] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintName {
+    ConsecutiveSemicolons,
+    ConstantExpression,
+    CountRows,
     DisallowNames,
+    DistinctParentheses,
+    ElseNull,
     ExplicitUnion,
+    IdentifierCharacters,
+    KeywordIdentifier,
     KeywordCase,
+    NotEqualStyle,
+    NullComparison,
+    OrderByDirection,
+    RequireOrderBy,
+    SelfAliasColumn,
+    SimpleCase,
+    UniqueColumnAlias,
+    UniqueTableAlias,
+    UnusedCte,
+    UnusedTableAlias,
 }
 
 impl LintName {
     pub const fn as_str(&self) -> &'static str {
         match self {
+            LintName::ConsecutiveSemicolons => "consecutive_semicolons",
+            LintName::ConstantExpression => "constant_expression",
+            LintName::CountRows => "count_rows",
             LintName::DisallowNames => "disallow_names",
+            LintName::DistinctParentheses => "distinct_parentheses",
+            LintName::ElseNull => "else_null",
             LintName::ExplicitUnion => "explicit_union",
+            LintName::IdentifierCharacters => "identifier_characters",
+            LintName::KeywordIdentifier => "keyword_identifier",
             LintName::KeywordCase => "keyword_case",
+            LintName::NotEqualStyle => "not_equal_style",
+            LintName::NullComparison => "null_comparison",
+            LintName::OrderByDirection => "order_by_direction",
+            LintName::RequireOrderBy => "require_order_by",
+            LintName::SelfAliasColumn => "self_alias_column",
+            LintName::SimpleCase => "simple_case",
+            LintName::UniqueColumnAlias => "unique_column_alias",
+            LintName::UniqueTableAlias => "unique_table_alias",
+            LintName::UnusedCte => "unused_cte",
+            LintName::UnusedTableAlias => "unused_table_alias",
         }
     }
 }
 
-pub const LINTS: &[LintName] =
-    &[LintName::DisallowNames, LintName::ExplicitUnion, LintName::KeywordCase];
+pub const LINTS: &[LintName] = &[
+    LintName::ConsecutiveSemicolons,
+    LintName::ConstantExpression,
+    LintName::CountRows,
+    LintName::DisallowNames,
+    LintName::DistinctParentheses,
+    LintName::ElseNull,
+    LintName::ExplicitUnion,
+    LintName::IdentifierCharacters,
+    LintName::KeywordIdentifier,
+    LintName::KeywordCase,
+    LintName::NotEqualStyle,
+    LintName::NullComparison,
+    LintName::OrderByDirection,
+    LintName::RequireOrderBy,
+    LintName::SelfAliasColumn,
+    LintName::SimpleCase,
+    LintName::UniqueColumnAlias,
+    LintName::UniqueTableAlias,
+    LintName::UnusedCte,
+    LintName::UnusedTableAlias,
+];
 
 #[derive(Debug, Clone)]
 pub struct LintNameParseError {
@@ -257,6 +311,24 @@ pub enum CapitalisationPolicy {
     Camel,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotEqualStyle {
+    #[default]
+    Consistent,
+    Angle,
+    Bang,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CountRowsStyle {
+    #[default]
+    Star,
+    One,
+    Zero,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeywordCaseConfig {
@@ -268,6 +340,26 @@ pub struct KeywordCaseConfig {
         default
     )]
     pub ignore_words_regex: Vec<Regex>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConsecutiveSemicolonsConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConstantExpressionConfig {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CountRowsConfig {
+    pub preferred: CountRowsStyle,
+}
+
+impl Default for CountRowsConfig {
+    fn default() -> Self {
+        Self { preferred: CountRowsStyle::Star }
+    }
 }
 
 fn deserialize_ignore_words_regex<'de, D>(deserializer: D) -> Result<Vec<Regex>, D::Error>
@@ -327,6 +419,14 @@ pub struct DisallowNamesConfig {
     #[serde(serialize_with = "serialize_disallow_name_regexes")]
     pub regexes: Vec<Regex>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DistinctParenthesesConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ElseNullConfig {}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -408,23 +508,116 @@ where
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Lints {
+    pub consecutive_semicolons: LintConfig<ConsecutiveSemicolonsConfig>,
+    pub constant_expression: LintConfig<ConstantExpressionConfig>,
+    pub count_rows: LintConfig<CountRowsConfig>,
     pub disallow_names: LintConfig<DisallowNamesConfig>,
+    pub distinct_parentheses: LintConfig<DistinctParenthesesConfig>,
+    pub else_null: LintConfig<ElseNullConfig>,
     pub explicit_union: LintConfig<ExplicitUnionConfig>,
+    pub identifier_characters: LintConfig<IdentifierCharactersConfig>,
+    pub keyword_identifier: LintConfig<KeywordIdentifierConfig>,
     pub keyword_case: LintConfig<KeywordCaseConfig>,
+    pub not_equal_style: LintConfig<NotEqualStyleConfig>,
+    pub null_comparison: LintConfig<NullComparisonConfig>,
+    pub order_by_direction: LintConfig<OrderByDirectionConfig>,
+    pub require_order_by: LintConfig<RequireOrderByConfig>,
+    pub self_alias_column: LintConfig<SelfAliasColumnConfig>,
+    pub simple_case: LintConfig<SimpleCaseConfig>,
+    pub unique_column_alias: LintConfig<UniqueColumnAliasConfig>,
+    pub unique_table_alias: LintConfig<UniqueTableAliasConfig>,
+    pub unused_cte: LintConfig<UnusedCteConfig>,
+    pub unused_table_alias: LintConfig<UnusedTableAliasConfig>,
 }
 
 impl Default for Lints {
     fn default() -> Self {
         Self {
+            consecutive_semicolons: LintConfig::default(),
+            constant_expression: LintConfig::default(),
+            count_rows: LintConfig::default(),
             disallow_names: LintConfig::default(),
+            distinct_parentheses: LintConfig::default(),
+            else_null: LintConfig::default(),
             explicit_union: LintConfig::default(),
+            identifier_characters: LintConfig::default(),
+            keyword_identifier: LintConfig::default(),
             keyword_case: LintConfig {
                 level: Severity::Allow,
                 options: KeywordCaseConfig::default(),
             },
+            not_equal_style: LintConfig::default(),
+            null_comparison: LintConfig::default(),
+            order_by_direction: LintConfig::default(),
+            require_order_by: LintConfig::default(),
+            self_alias_column: LintConfig::default(),
+            simple_case: LintConfig::default(),
+            unique_column_alias: LintConfig::default(),
+            unique_table_alias: LintConfig::default(),
+            unused_cte: LintConfig::default(),
+            unused_table_alias: LintConfig::default(),
         }
     }
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IdentifierCharactersConfig {
+    pub allow_space: bool,
+    pub additional_allowed_characters: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeywordIdentifierConfig {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotEqualStyleConfig {
+    pub preferred: NotEqualStyle,
+}
+
+impl Default for NotEqualStyleConfig {
+    fn default() -> Self {
+        Self { preferred: NotEqualStyle::Consistent }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NullComparisonConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OrderByDirectionConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RequireOrderByConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SelfAliasColumnConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SimpleCaseConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UniqueColumnAliasConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UniqueTableAliasConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UnusedCteConfig {}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UnusedTableAliasConfig {}
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]

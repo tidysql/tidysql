@@ -1,0 +1,9 @@
+[[case]]
+name = "keyword_identifier"
+sql = "SELECT a AS \"select\" FROM foo"
+expect = [{ code = "keyword_identifier" }]
+
+[[case]]
+name = "identifier_characters"
+sql = "SELECT a AS \"has space\" FROM foo"
+expect = [{ code = "identifier_characters" }]

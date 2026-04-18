@@ -132,14 +132,65 @@ fn apply_lint_level(
     level: tidysql_config::Severity,
 ) {
     match lint {
+        tidysql_config::LintName::ConsecutiveSemicolons => {
+            config.lints.consecutive_semicolons.level = level;
+        }
+        tidysql_config::LintName::ConstantExpression => {
+            config.lints.constant_expression.level = level;
+        }
+        tidysql_config::LintName::CountRows => {
+            config.lints.count_rows.level = level;
+        }
         tidysql_config::LintName::DisallowNames => {
             config.lints.disallow_names.level = level;
+        }
+        tidysql_config::LintName::DistinctParentheses => {
+            config.lints.distinct_parentheses.level = level;
+        }
+        tidysql_config::LintName::ElseNull => {
+            config.lints.else_null.level = level;
         }
         tidysql_config::LintName::ExplicitUnion => {
             config.lints.explicit_union.level = level;
         }
+        tidysql_config::LintName::IdentifierCharacters => {
+            config.lints.identifier_characters.level = level;
+        }
+        tidysql_config::LintName::KeywordIdentifier => {
+            config.lints.keyword_identifier.level = level;
+        }
         tidysql_config::LintName::KeywordCase => {
             config.lints.keyword_case.level = level;
+        }
+        tidysql_config::LintName::NotEqualStyle => {
+            config.lints.not_equal_style.level = level;
+        }
+        tidysql_config::LintName::NullComparison => {
+            config.lints.null_comparison.level = level;
+        }
+        tidysql_config::LintName::OrderByDirection => {
+            config.lints.order_by_direction.level = level;
+        }
+        tidysql_config::LintName::RequireOrderBy => {
+            config.lints.require_order_by.level = level;
+        }
+        tidysql_config::LintName::SelfAliasColumn => {
+            config.lints.self_alias_column.level = level;
+        }
+        tidysql_config::LintName::SimpleCase => {
+            config.lints.simple_case.level = level;
+        }
+        tidysql_config::LintName::UniqueColumnAlias => {
+            config.lints.unique_column_alias.level = level;
+        }
+        tidysql_config::LintName::UniqueTableAlias => {
+            config.lints.unique_table_alias.level = level;
+        }
+        tidysql_config::LintName::UnusedCte => {
+            config.lints.unused_cte.level = level;
+        }
+        tidysql_config::LintName::UnusedTableAlias => {
+            config.lints.unused_table_alias.level = level;
         }
     }
 }

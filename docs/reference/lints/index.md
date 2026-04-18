@@ -25,4 +25,21 @@ This reference is generated from lint metadata in code.
 | [`keyword_case`](keyword_case.md) | `allow` | yes | Enforces consistent capitalisation of SQL keywords. |
 | [`explicit_union`](explicit_union.md) | `warn` | yes | Requires UNION to explicitly specify ALL or DISTINCT. |
 | [`disallow_names`](disallow_names.md) | `warn` | no | Disallows specific identifier names. |
+| [`consecutive_semicolons`](consecutive_semicolons.md) | `warn` | yes | Flags duplicate semicolons that create empty statements. |
+| [`constant_expression`](constant_expression.md) | `warn` | no | Flags constant or self-comparing expressions. |
+| [`count_rows`](count_rows.md) | `warn` | yes | Enforces a consistent COUNT() style for row counts. |
+| [`distinct_parentheses`](distinct_parentheses.md) | `warn` | yes | Disallows DISTINCT used like a function call. |
+| [`else_null`](else_null.md) | `warn` | yes | Removes redundant ELSE NULL branches from CASE expressions. |
+| [`identifier_characters`](identifier_characters.md) | `warn` | no | Flags identifiers with special characters. |
+| [`keyword_identifier`](keyword_identifier.md) | `warn` | no | Avoids SQL keywords as identifiers. |
+| [`not_equal_style`](not_equal_style.md) | `warn` | yes | Enforces a consistent not-equal operator style. |
+| [`null_comparison`](null_comparison.md) | `warn` | yes | Requires IS or IS NOT for NULL checks. |
+| [`order_by_direction`](order_by_direction.md) | `warn` | yes | Requires consistent ASC/DESC modifiers across ORDER BY items. |
+| [`require_order_by`](require_order_by.md) | `warn` | no | Flags LIMIT or OFFSET without ORDER BY. |
+| [`self_alias_column`](self_alias_column.md) | `warn` | yes | Removes column aliases that repeat the source name. |
+| [`simple_case`](simple_case.md) | `warn` | yes | Simplifies CASE expressions that only fill NULL values. |
+| [`unique_column_alias`](unique_column_alias.md) | `warn` | no | Requires column aliases to be unique within a SELECT clause. |
+| [`unique_table_alias`](unique_table_alias.md) | `warn` | no | Requires table aliases to be unique within a statement. |
+| [`unused_cte`](unused_cte.md) | `warn` | no | Flags CTEs that are defined but never referenced. |
+| [`unused_table_alias`](unused_table_alias.md) | `warn` | yes | Removes table aliases that are never referenced. |
 
