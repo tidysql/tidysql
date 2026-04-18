@@ -110,6 +110,21 @@ pub(crate) trait FilePass {
     fn check(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>);
 }
 
+const fn needs_statement_analysis(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::SelectStatement
+            | SyntaxKind::SelectClause
+            | SyntaxKind::OrderbyClause
+            | SyntaxKind::WithCompoundStatement
+            | SyntaxKind::Expression
+    )
+}
+
+const fn lint_enabled(level: Severity) -> bool {
+    !matches!(level, Severity::Allow)
+}
+
 pub fn run(dialect: DialectKind, tree: &SyntaxTree, config: &Config) -> Vec<Diagnostic> {
     let ctx = LintContext {
         dialect,
@@ -150,16 +165,7 @@ fn run_statement_passes(
     node: &SyntaxNode,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let needs_analysis = matches!(
-        node.kind(),
-        SyntaxKind::SelectStatement
-            | SyntaxKind::SelectClause
-            | SyntaxKind::OrderbyClause
-            | SyntaxKind::WithCompoundStatement
-            | SyntaxKind::Expression
-    );
-
-    if !needs_analysis {
+    if !needs_statement_analysis(node.kind()) {
         return;
     }
 
@@ -194,7 +200,7 @@ fn run_node_pass<L: NodePass>(
     node: &SyntaxNode,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if L::level(ctx.config) == Severity::Allow || node.kind() != L::TARGET {
+    if !lint_enabled(L::level(ctx.config)) || node.kind() != L::TARGET {
         return;
     }
 
@@ -207,7 +213,7 @@ fn run_statement_pass<L: StatementPass>(
     analysis: &semantic::StatementAnalysis,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if L::level(ctx.config) == Severity::Allow || node.kind() != L::TARGET {
+    if !lint_enabled(L::level(ctx.config)) || node.kind() != L::TARGET {
         return;
     }
 
@@ -219,7 +225,7 @@ fn run_token_pass<L: TokenPass>(
     token: &SyntaxToken,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if L::level(ctx.config) == Severity::Allow || !L::matches(token.kind()) {
+    if !lint_enabled(L::level(ctx.config)) || !L::matches(token.kind()) {
         return;
     }
 
@@ -227,7 +233,7 @@ fn run_token_pass<L: TokenPass>(
 }
 
 fn run_file_pass<L: FilePass>(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
-    if L::level(ctx.config) == Severity::Allow {
+    if !lint_enabled(L::level(ctx.config)) {
         return;
     }
 

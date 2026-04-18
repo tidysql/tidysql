@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react'
 import { useTidysqlWorkspace } from './hooks/useTidysqlWorkspace'
 import { extractDialect, updateDialectInConfig } from './utils/config'
 import { cancelIdle, scheduleIdle } from './utils/idle'
+import type { MonacoDiagnostic } from './workers/protocol'
 import './App.css'
 
 const initialSql = `SELECT id, name
@@ -99,13 +100,8 @@ const ensureMonacoOverlayRoot = () => {
   return root as HTMLDivElement
 }
 
-type MonacoDiagnostic = {
-  message: string
-  severity: 'error' | 'warning' | 'info' | 'hint'
-  start: { line: number; column: number }
-  end: { line: number; column: number }
-  source?: 'sql' | 'config'
-}
+type MonacoEditor = import('monaco-editor').editor.IStandaloneCodeEditor
+type MonacoModule = typeof import('monaco-editor')
 
 function App() {
   const [sql, setSql] = useState(initialSql)
@@ -118,14 +114,22 @@ function App() {
   const [dialectChangePending, setDialectChangePending] = useState(false)
   const [diagnostics, setDiagnostics] = useState<MonacoDiagnostic[]>([])
   const configRef = useRef(configToml)
+  const sqlRef = useRef(sql)
+  const latestDiagnosticsTokenRef = useRef(0)
   const {
-    workspaceRef,
     status: workspaceStatus,
     error: workspaceError,
     dialectOptions,
     dialectsReady,
+    checkWithConfig,
+    formatWithConfig,
+    fixWithConfig,
   } = useTidysqlWorkspace()
   const wasmReady = workspaceStatus === 'ready'
+  const wasmReadyRef = useRef(wasmReady)
+  const checkWithConfigRef = useRef(checkWithConfig)
+  const formatWithConfigRef = useRef(formatWithConfig)
+  const fixWithConfigRef = useRef(fixWithConfig)
   const overlayRoot = useMemo(() => ensureMonacoOverlayRoot(), [])
   const activeSource = activeTab === 'sql' ? sql : configToml
   const lineNumbers = useMemo(() => {
@@ -186,40 +190,41 @@ function App() {
     configRef.current = configToml
   }, [configToml])
 
-  const runDiagnostics = useCallback((source: string) => {
-    const workspace = workspaceRef.current
+  useEffect(() => {
+    sqlRef.current = sql
+  }, [sql])
 
-    if (!workspace) {
-      return
+  useEffect(() => {
+    wasmReadyRef.current = wasmReady
+  }, [wasmReady])
+
+  useEffect(() => {
+    checkWithConfigRef.current = checkWithConfig
+  }, [checkWithConfig])
+
+  useEffect(() => {
+    formatWithConfigRef.current = formatWithConfig
+  }, [formatWithConfig])
+
+  useEffect(() => {
+    fixWithConfigRef.current = fixWithConfig
+  }, [fixWithConfig])
+
+  const clearDiagnosticsMarkers = useCallback(() => {
+    const monaco = monacoRef.current
+    const sqlModel = editorRef.current?.getModel()
+    const configModel = configEditorRef.current?.getModel()
+
+    if (monaco && sqlModel) {
+      monaco.editor.setModelMarkers(sqlModel, 'tidysql', [])
     }
 
-    let diagnostics: MonacoDiagnostic[] = []
-    const configSnapshot = configRef.current
-
-    try {
-      diagnostics = workspace.check_with_config(
-        source,
-        configSnapshot
-      ) as MonacoDiagnostic[]
-    } catch {
-      const monaco = monacoRef.current
-      const sqlModel = editorRef.current?.getModel()
-      const configModel = configEditorRef.current?.getModel()
-
-      if (monaco && sqlModel) {
-        monaco.editor.setModelMarkers(sqlModel, 'tidysql', [])
-      }
-
-      if (monaco && configModel) {
-        monaco.editor.setModelMarkers(configModel, 'tidysql-config', [])
-      }
-
-      setDiagnostics([])
-      return
+    if (monaco && configModel) {
+      monaco.editor.setModelMarkers(configModel, 'tidysql-config', [])
     }
+  }, [])
 
-    setDiagnostics(diagnostics)
-
+  const applyDiagnosticsMarkers = useCallback((nextDiagnostics: MonacoDiagnostic[]) => {
     const monaco = monacoRef.current
     const sqlModel = editorRef.current?.getModel()
     const configModel = configEditorRef.current?.getModel()
@@ -255,10 +260,10 @@ function App() {
       }
     }
 
-    const sqlMarkers = diagnostics
+    const sqlMarkers = nextDiagnostics
       .filter((diagnostic) => (diagnostic.source ?? 'sql') === 'sql')
       .map(toMarker)
-    const configMarkers = diagnostics
+    const configMarkers = nextDiagnostics
       .filter((diagnostic) => diagnostic.source === 'config')
       .map(toMarker)
 
@@ -269,73 +274,93 @@ function App() {
     if (configModel) {
       monaco.editor.setModelMarkers(configModel, 'tidysql-config', configMarkers)
     }
-  }, [workspaceRef])
+  }, [])
 
-  const handleFormat = () => {
-    if (!workspaceRef.current) {
-      return
-    }
-
-    const source = editorRef.current?.getValue() ?? sql
-    let formatted = source
-    try {
-      formatted = workspaceRef.current.format_with_config(
-        source,
-        configRef.current
-      ) as string
-    } catch {
-      runDiagnostics(source)
-      return
-    }
-
-    if (editorRef.current && formatted !== source) {
-      editorRef.current.setValue(formatted)
-      return
-    }
-
-    setSql(formatted)
-  }
-
-  const handleFixAll = () => {
-    if (!workspaceRef.current) {
-      return
-    }
-
-    const source = editorRef.current?.getValue() ?? sql
-    let fixed = source
-    try {
-      fixed = workspaceRef.current.fix_with_config(
-        source,
-        configRef.current
-      ) as string
-    } catch {
-      runDiagnostics(source)
-      return
-    }
-
-    if (editorRef.current && fixed !== source) {
-      editorRef.current.setValue(fixed)
-      return
-    }
-
-    setSql(fixed)
-  }
-
-  const formatSource = (source: string) => {
-    if (!workspaceRef.current) {
-      return source
-    }
+  const runDiagnostics = useCallback(async (source: string) => {
+    const requestToken = latestDiagnosticsTokenRef.current + 1
+    latestDiagnosticsTokenRef.current = requestToken
 
     try {
-      return workspaceRef.current.format_with_config(
-        source,
-        configRef.current
-      ) as string
+      const nextDiagnostics = await checkWithConfigRef.current(source, configRef.current)
+
+      if (latestDiagnosticsTokenRef.current !== requestToken) {
+        return
+      }
+
+      setDiagnostics(nextDiagnostics)
+      applyDiagnosticsMarkers(nextDiagnostics)
     } catch {
-      runDiagnostics(source)
-      return source
+      if (latestDiagnosticsTokenRef.current !== requestToken) {
+        return
+      }
+
+      clearDiagnosticsMarkers()
+      setDiagnostics([])
     }
-  }
+  }, [applyDiagnosticsMarkers, clearDiagnosticsMarkers])
+
+  const runSqlTransform = useCallback(
+    async (operation: 'format' | 'fix', sourceOverride?: string, editorOverride?: MonacoEditor | null) => {
+      if (!wasmReadyRef.current) {
+        return
+      }
+
+      const activeEditor = editorOverride ?? editorRef.current
+      const source = sourceOverride ?? activeEditor?.getValue() ?? sqlRef.current
+      const expectedVersion = activeEditor?.getModel()?.getAlternativeVersionId() ?? null
+
+      try {
+        const transformed =
+          operation === 'format'
+            ? await formatWithConfigRef.current(source, configRef.current)
+            : await fixWithConfigRef.current(source, configRef.current)
+
+        const latestEditor = editorOverride ?? editorRef.current
+        const latestModel = latestEditor?.getModel()
+
+        // Drop stale async edits instead of overwriting newer typing.
+        if (
+          expectedVersion !== null &&
+          latestModel &&
+          latestModel.getAlternativeVersionId() !== expectedVersion
+        ) {
+          await runDiagnostics(latestEditor?.getValue() ?? sqlRef.current)
+          return
+        }
+
+        if (latestEditor) {
+          const latestSource = latestEditor.getValue()
+
+          if (transformed !== latestSource) {
+            latestEditor.setValue(transformed)
+          }
+
+          return
+        }
+
+        setSql(transformed)
+      } catch {
+        await runDiagnostics(source)
+      }
+    },
+    [runDiagnostics]
+  )
+
+  const handleFormat = useCallback(() => {
+    if (!wasmReady) {
+      return
+    }
+
+    void runSqlTransform('format')
+  }, [runSqlTransform, wasmReady])
+
+  const handleFixAll = useCallback(() => {
+    if (!wasmReady) {
+      return
+    }
+
+    void runSqlTransform('fix')
+  }, [runSqlTransform, wasmReady])
 
   const updateConfigToml = (nextConfig: string) => {
     setConfigToml(nextConfig)
@@ -354,8 +379,9 @@ function App() {
     }
 
     const handle = scheduleIdle(() => {
-      runDiagnostics(sql)
-      setDialectChangePending(false)
+      void runDiagnostics(sql).finally(() => {
+        setDialectChangePending(false)
+      })
     })
 
     return () => {
@@ -375,7 +401,7 @@ function App() {
     }
   }, [activeTab])
 
-  const handleBeforeMount = (monaco: typeof import('monaco-editor')) => {
+  const handleBeforeMount = (monaco: MonacoModule) => {
     configureMonaco(monaco)
   }
 
@@ -386,8 +412,8 @@ function App() {
   }
 
   const handleSqlMount = (
-    editor: import('monaco-editor').editor.IStandaloneCodeEditor,
-    monaco: typeof import('monaco-editor')
+    editor: MonacoEditor,
+    monaco: MonacoModule
   ) => {
     editorRef.current = editor
     monacoRef.current = monaco
@@ -399,27 +425,21 @@ function App() {
       keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
       contextMenuGroupId: '1_modification',
       contextMenuOrder: 1.5,
-      run: () => {
-        const source = editor.getValue()
-        const formatted = formatSource(source)
-        if (formatted !== source) {
-          editor.setValue(formatted)
-        }
+      run: async () => {
+        await runSqlTransform('format', editor.getValue(), editor)
       },
     })
 
     editor.onDidScrollChange(handleEditorScroll)
   }
 
-  const handleTomlMount = (
-    editor: import('monaco-editor').editor.IStandaloneCodeEditor
-  ) => {
+  const handleTomlMount = (editor: MonacoEditor) => {
     configEditorRef.current = editor
     editor.onDidScrollChange(handleEditorScroll)
 
     if (wasmReady) {
       scheduleIdle(() => {
-        runDiagnostics(sql)
+        void runDiagnostics(sqlRef.current)
       })
     }
   }

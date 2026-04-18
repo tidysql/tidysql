@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "measure:worker-offload": "node ./scripts/measure-worker-offload.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

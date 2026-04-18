@@ -43,14 +43,13 @@ impl StatementAnalysis {
                 SyntaxKind::AliasExpression => {
                     let Some(parent) = node.parent() else { continue };
                     let Some(token) = alias_identifier(&node) else { continue };
-                    let binding = AliasBinding {
-                        name: normalized_identifier(token.text()),
-                        token,
-                        alias_expression: node.clone(),
-                    };
                     match parent.kind() {
-                        SyntaxKind::FromExpressionElement => analysis.table_aliases.push(binding),
-                        SyntaxKind::SelectClauseElement => analysis.column_aliases.push(binding),
+                        SyntaxKind::FromExpressionElement => {
+                            analysis.table_aliases.push(alias_binding(&node, token))
+                        }
+                        SyntaxKind::SelectClauseElement => {
+                            analysis.column_aliases.push(alias_binding(&node, token))
+                        }
                         _ => {}
                     }
                 }
@@ -63,12 +62,7 @@ impl StatementAnalysis {
                     }
                 }
                 SyntaxKind::SetExpression => {
-                    let arities = node
-                        .children()
-                        .filter(|child| child.kind() == SyntaxKind::SelectStatement)
-                        .map(|select| select_target_count(&select))
-                        .collect::<Vec<_>>();
-                    if arities.len() > 1 {
+                    if let Some(arities) = set_expression_arities(&node) {
                         analysis.set_expression_arities.push(arities);
                     }
                 }
@@ -83,6 +77,23 @@ impl StatementAnalysis {
 
         analysis
     }
+}
+
+fn alias_binding(alias_expression: &SyntaxNode, token: SyntaxToken) -> AliasBinding {
+    AliasBinding {
+        name: normalized_identifier(token.text()),
+        token,
+        alias_expression: alias_expression.clone(),
+    }
+}
+
+fn set_expression_arities(node: &SyntaxNode) -> Option<Vec<usize>> {
+    let arities = node
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::SelectStatement)
+        .map(|select| select_target_count(&select))
+        .collect::<Vec<_>>();
+    (arities.len() > 1).then_some(arities)
 }
 
 fn select_target_count(select_statement: &SyntaxNode) -> usize {
@@ -110,16 +121,21 @@ fn cte_definitions(with_statement: &SyntaxNode) -> Vec<CteDefinition> {
 }
 
 fn cte_usages(with_statement: &SyntaxNode) -> HashSet<String> {
-    let trailing_children = with_statement
-        .children()
-        .filter(|child| child.kind() != SyntaxKind::CommonTableExpression)
-        .collect::<Vec<_>>();
+    let mut usages = HashSet::new();
 
-    trailing_children
-        .into_iter()
-        .flat_map(|child| child.descendants().collect::<Vec<_>>())
-        .filter(|node| node.kind() == SyntaxKind::TableReference)
-        .filter_map(|table_reference| first_identifier_token(&table_reference))
-        .map(|token| normalized_identifier(token.text()))
-        .collect()
+    for child in
+        with_statement.children().filter(|child| child.kind() != SyntaxKind::CommonTableExpression)
+    {
+        for node in child.descendants() {
+            if node.kind() != SyntaxKind::TableReference {
+                continue;
+            }
+
+            if let Some(token) = first_identifier_token(&node) {
+                usages.insert(normalized_identifier(token.text()));
+            }
+        }
+    }
+
+    usages
 }
