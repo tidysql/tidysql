@@ -237,7 +237,8 @@ consecutive_semicolons = { level = "warn" }"#,
     LintMetadata {
         code: "constant_expression",
         summary: "Flags constant or self-comparing expressions.",
-        rationale: "Expressions that are always true or compare a value to itself are often mistakes.",
+        rationale: "Expressions that are always true or compare a value to itself are often \
+                    mistakes.",
         fixable: false,
         config_example: r#"[lints]
 constant_expression = { level = "warn" }"#,
@@ -251,7 +252,8 @@ constant_expression = { level = "warn" }"#,
     LintMetadata {
         code: "count_rows",
         summary: "Enforces a consistent COUNT() style for row counts.",
-        rationale: "A single row-count convention keeps aggregation code uniform and easier to scan.",
+        rationale: "A single row-count convention keeps aggregation code uniform and easier to \
+                    scan.",
         fixable: true,
         config_example: r#"[lints]
 count_rows = { level = "warn", preferred = "star" }"#,
@@ -265,7 +267,8 @@ count_rows = { level = "warn", preferred = "star" }"#,
     LintMetadata {
         code: "distinct_parentheses",
         summary: "Disallows DISTINCT used like a function call.",
-        rationale: "DISTINCT applies to the whole select list, so parentheses around the first item are misleading.",
+        rationale: "DISTINCT applies to the whole select list, so parentheses around the first \
+                    item are misleading.",
         fixable: true,
         config_example: r#"[lints]
 distinct_parentheses = { level = "warn" }"#,
@@ -293,7 +296,8 @@ else_null = { level = "warn" }"#,
     LintMetadata {
         code: "identifier_characters",
         summary: "Flags identifiers with special characters.",
-        rationale: "Simple identifiers are easier to quote correctly and are more portable across dialects.",
+        rationale: "Simple identifiers are easier to quote correctly and are more portable across \
+                    dialects.",
         fixable: false,
         config_example: r#"[lints]
 identifier_characters = { level = "warn", allow_space = false, additional_allowed_characters = "" }"#,
@@ -307,7 +311,8 @@ identifier_characters = { level = "warn", allow_space = false, additional_allowe
     LintMetadata {
         code: "keyword_identifier",
         summary: "Avoids SQL keywords as identifiers.",
-        rationale: "Keyword-shaped identifiers are valid in some contexts but remain confusing to readers.",
+        rationale: "Keyword-shaped identifiers are valid in some contexts but remain confusing to \
+                    readers.",
         fixable: false,
         config_example: r#"[lints]
 keyword_identifier = { level = "warn" }"#,
@@ -352,7 +357,8 @@ null_comparison = { level = "warn" }"#,
     LintMetadata {
         code: "order_by_direction",
         summary: "Requires consistent ASC/DESC modifiers across ORDER BY items.",
-        rationale: "When some ORDER BY items include a direction and others do not, intent is harder to read.",
+        rationale: "When some ORDER BY items include a direction and others do not, intent is \
+                    harder to read.",
         fixable: true,
         config_example: r#"[lints]
 order_by_direction = { level = "warn" }"#,
@@ -401,9 +407,8 @@ simple_case = { level = "warn" }"#,
         options: &[],
         anti_pattern: "CASE WHEN x IS NULL THEN 0 ELSE x END",
         best_practices: &["COALESCE(x, 0)"],
-        notes: &[
-            "The current implementation targets the common CASE ... IS NULL ... ELSE same-value pattern.",
-        ],
+        notes: &["The current implementation targets the common CASE ... IS NULL ... ELSE \
+                  same-value pattern."],
         dialects: &[],
         level: level_simple_case,
     },
@@ -459,9 +464,8 @@ unused_table_alias = { level = "warn" }"#,
         options: &[],
         anti_pattern: "SELECT a FROM foo AS f",
         best_practices: &["SELECT a FROM foo"],
-        notes: &[
-            "The current implementation removes only aliases that are not referenced anywhere else in the statement.",
-        ],
+        notes: &["The current implementation removes only aliases that are not referenced \
+                  anywhere else in the statement."],
         dialects: &[],
         level: level_unused_table_alias,
     },
