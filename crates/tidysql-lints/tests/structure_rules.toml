@@ -5,6 +5,28 @@ expect = [{ code = "distinct_parentheses" }]
 fixed_sql = "SELECT DISTINCT a, b FROM foo"
 
 [[case]]
+name = "distinct_parentheses_nested_expression"
+sql = "SELECT DISTINCT(a + b) FROM foo"
+expect = [{ code = "distinct_parentheses" }]
+fixed_sql = "SELECT DISTINCT a + b FROM foo"
+
+[[case]]
+name = "distinct_parentheses_ignores_count_distinct"
+sql = "SELECT COUNT(DISTINCT id) FROM foo"
+
+[[case]]
+name = "distinct_parentheses_ignores_function_call"
+sql = "SELECT DISTINCT func(a) FROM foo"
+
+[[case]]
+name = "distinct_parentheses_ignores_partial_expression_parentheses"
+sql = "SELECT DISTINCT (a) + b FROM foo"
+
+[[case]]
+name = "distinct_parentheses_ignores_scalar_subquery"
+sql = "SELECT DISTINCT (SELECT 1) FROM foo"
+
+[[case]]
 name = "else_null_is_redundant"
 sql = "SELECT CASE WHEN flag THEN 1 ELSE NULL END FROM foo"
 expect = [{ code = "else_null" }]

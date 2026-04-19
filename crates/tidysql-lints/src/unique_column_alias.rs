@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use tidysql_syntax::SyntaxKind;
 
 use crate::semantic::StatementAnalysis;
-use crate::{Diagnostic, LintContext, Severity, StatementPass};
+use crate::{Diagnostic, LintContext, SemanticPass, Severity};
 
 pub(crate) struct UniqueColumnAlias;
 
-impl StatementPass for UniqueColumnAlias {
+impl SemanticPass for UniqueColumnAlias {
     const CODE: &'static str = "unique_column_alias";
     const TARGET: SyntaxKind = SyntaxKind::SelectClause;
 

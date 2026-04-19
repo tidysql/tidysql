@@ -186,4 +186,28 @@ mod tests {
         assert_eq!(pos.line, 1);
         assert_eq!(pos.column, 3);
     }
+
+    #[test]
+    fn config_errors_report_resolver_only_fields() {
+        let error = tidysql_config::Config::from_toml_str(
+            r#"
+extend = "parent.toml"
+"#,
+        )
+        .unwrap_err();
+
+        let message = config_error_message(&error);
+        assert!(message.contains("unknown field `extend`"));
+
+        let error = tidysql_config::Config::from_toml_str(
+            r#"
+[files]
+respect_gitignore = true
+"#,
+        )
+        .unwrap_err();
+
+        let message = config_error_message(&error);
+        assert!(message.contains("unknown field `files`"));
+    }
 }

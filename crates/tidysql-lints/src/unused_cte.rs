@@ -1,11 +1,11 @@
 use tidysql_syntax::SyntaxKind;
 
 use crate::semantic::StatementAnalysis;
-use crate::{Diagnostic, LintContext, Severity, StatementPass};
+use crate::{Diagnostic, LintContext, SemanticPass, Severity};
 
 pub(crate) struct UnusedCte;
 
-impl StatementPass for UnusedCte {
+impl SemanticPass for UnusedCte {
     const CODE: &'static str = "unused_cte";
     const TARGET: SyntaxKind = SyntaxKind::WithCompoundStatement;
 

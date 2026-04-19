@@ -1,6 +1,5 @@
 use tidysql_syntax::{SyntaxKind, SyntaxNode};
 
-use crate::semantic::StatementAnalysis;
 use crate::{Diagnostic, LintContext, Severity, StatementPass};
 
 pub(crate) struct ConstantExpression;
@@ -13,12 +12,7 @@ impl StatementPass for ConstantExpression {
         config.lints.constant_expression.level
     }
 
-    fn check(
-        ctx: &LintContext<'_>,
-        node: &SyntaxNode,
-        _analysis: &StatementAnalysis,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
+    fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>) {
         let children: Vec<_> = node.children().collect();
         if children.len() != 3 || children[1].kind() != SyntaxKind::ComparisonOperator {
             return;

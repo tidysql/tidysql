@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
@@ -15,10 +16,16 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::ConfigArguments;
+use crate::paths::normalize_path;
 
 const SOURCE: &str = "tidysql";
 const CONFIG_ERROR_CODE: &str = "config_error";
 type DocumentState = (String, i32);
+
+struct AnalysisTask {
+    version: i32,
+    handle: JoinHandle<()>,
+}
 
 pub fn run(config: ConfigArguments) -> std::result::Result<(), String> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -40,13 +47,19 @@ async fn run_async(config: ConfigArguments) -> std::result::Result<(), String> {
 
 struct Backend {
     client: Client,
-    documents: RwLock<HashMap<Url, DocumentState>>,
+    documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
+    in_flight: Arc<RwLock<HashMap<Url, AnalysisTask>>>,
     config: Arc<ConfigArguments>,
 }
 
 impl Backend {
     fn new(client: Client, config: ConfigArguments) -> Self {
-        Self { client, documents: RwLock::new(HashMap::new()), config: Arc::new(config) }
+        Self {
+            client,
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            in_flight: Arc::new(RwLock::new(HashMap::new())),
+            config: Arc::new(config),
+        }
     }
 
     fn config_error_diagnostic(message: String) -> LspDiagnostic {
@@ -58,29 +71,6 @@ impl Backend {
             message,
             ..Default::default()
         }
-    }
-
-    async fn publish_diagnostics(&self, uri: Url, text: &str, version: i32) {
-        let config = match self.load_config(&uri).await {
-            Ok(config) => config,
-            Err(message) => {
-                let diagnostic = Self::config_error_diagnostic(message);
-                self.client.publish_diagnostics(uri, vec![diagnostic], Some(version)).await;
-                return;
-            }
-        };
-        let diagnostics = tidysql::check_with_config(text, &config);
-        let lsp_diagnostics = diagnostics
-            .iter()
-            .filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text))
-            .collect();
-        self.client.publish_diagnostics(uri, lsp_diagnostics, Some(version)).await;
-    }
-
-    async fn load_config(&self, uri: &Url) -> std::result::Result<tidysql_config::Config, String> {
-        let source_path = uri.to_file_path().ok();
-        let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
-        self.config.load_config(source_path)
     }
 
     async fn load_text(&self, uri: &Url) -> Option<(String, i32)> {
@@ -95,7 +85,63 @@ impl Backend {
 
     async fn update_document(&self, uri: Url, text: String, version: i32) {
         self.documents.write().await.insert(uri.clone(), (text.clone(), version));
-        self.publish_diagnostics(uri, &text, version).await;
+        self.schedule_diagnostics(uri, text, version).await;
+    }
+
+    async fn schedule_diagnostics(&self, uri: Url, text: String, version: i32) {
+        let handle = self.spawn_diagnostics_task(uri.clone(), text, version);
+        if let Some(previous) =
+            self.in_flight.write().await.insert(uri, AnalysisTask { version, handle })
+        {
+            previous.handle.abort();
+        }
+    }
+
+    fn spawn_diagnostics_task(&self, uri: Url, text: String, version: i32) -> JoinHandle<()> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        let in_flight = self.in_flight.clone();
+
+        tokio::spawn(async move {
+            let diagnostics = match tokio::task::spawn_blocking({
+                let uri = uri.clone();
+                move || compute_lsp_diagnostics(config, &uri, &text)
+            })
+            .await
+            {
+                Ok(Ok(diagnostics)) => diagnostics,
+                Ok(Err(message)) => vec![Backend::config_error_diagnostic(message)],
+                Err(_) => return,
+            };
+
+            if !is_latest_version(&in_flight, &uri, version).await {
+                return;
+            }
+
+            client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+
+            let mut tasks = in_flight.write().await;
+            if tasks.get(&uri).map(|task| task.version) == Some(version) {
+                tasks.remove(&uri);
+            }
+        })
+    }
+
+    async fn refresh_open_documents(&self) {
+        let open_documents = self.documents.read().await.clone();
+        for (uri, (text, version)) in open_documents {
+            self.schedule_diagnostics(uri, text, version).await;
+        }
+    }
+
+    async fn abort_in_flight(&self, uri: &Url) {
+        if let Some(task) = self.in_flight.write().await.remove(uri) {
+            task.handle.abort();
+        }
+    }
+
+    async fn document_version(&self, uri: &Url) -> i32 {
+        self.documents.read().await.get(uri).map(|(_, version)| *version).unwrap_or(0)
     }
 }
 
@@ -143,8 +189,15 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
+        if should_invalidate_resolver_for_uri(self.config.as_ref(), &uri) {
+            self.config.invalidate_resolver();
+            self.refresh_open_documents().await;
+            return;
+        }
+
+        let version = self.document_version(&uri).await;
         let text = match params.text {
-            Some(text) => Some((text, 0i32)),
+            Some(text) => Some((text, version)),
             None => self.load_text(&uri).await,
         };
 
@@ -156,24 +209,68 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
+        self.abort_in_flight(&uri).await;
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let uri = params.text_document.uri;
-        let Some((text, _version)) = self.load_text(&uri).await else {
-            return Ok(None);
-        };
-
-        let Ok(config) = self.load_config(&uri).await else {
-            return Ok(None);
-        };
-        let Ok(formatted) = tidysql::format_with_config(&text, &config) else {
-            return Ok(None);
-        };
-        let range = full_document_range(&text);
-        Ok(Some(vec![TextEdit { range, new_text: formatted }]))
+        let _ = params;
+        Ok(None)
     }
+}
+
+fn compute_lsp_diagnostics(
+    config_arguments: Arc<ConfigArguments>,
+    uri: &Url,
+    text: &str,
+) -> std::result::Result<Vec<LspDiagnostic>, String> {
+    if is_config_document_uri(config_arguments.as_ref(), uri) {
+        let path = uri.to_file_path().ok();
+        tidysql_config::parse_config(text, path).map_err(|err| err.to_string())?;
+        return Ok(Vec::new());
+    }
+
+    let source_path = uri.to_file_path().ok();
+    let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let diagnostics = tidysql::check_with_config(text, &config);
+    Ok(diagnostics.iter().filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text)).collect())
+}
+
+async fn is_latest_version(
+    in_flight: &Arc<RwLock<HashMap<Url, AnalysisTask>>>,
+    uri: &Url,
+    version: i32,
+) -> bool {
+    in_flight.read().await.get(uri).map(|task| task.version) == Some(version)
+}
+
+fn should_invalidate_resolver_for_uri(config_arguments: &ConfigArguments, uri: &Url) -> bool {
+    is_config_document_uri(config_arguments, uri)
+}
+
+fn is_config_document_uri(config_arguments: &ConfigArguments, uri: &Url) -> bool {
+    let Ok(path) = uri.to_file_path() else {
+        return false;
+    };
+
+    is_default_config_path(&path)
+        || is_explicit_config_path(config_arguments, &path)
+        || config_arguments.resolver.has_loaded_config_path(&path)
+}
+
+fn is_default_config_path(path: &Path) -> bool {
+    path.file_name()
+        .map(|name| name.to_string_lossy() == tidysql_config::DEFAULT_CONFIG_FILE)
+        .unwrap_or(false)
+}
+
+fn is_explicit_config_path(config_arguments: &ConfigArguments, path: &Path) -> bool {
+    config_arguments
+        .config_path
+        .as_deref()
+        .map(|config_path| normalize_path(config_path) == normalize_path(path))
+        .unwrap_or(false)
 }
 
 fn to_lsp_diagnostic(diagnostic: &tidysql::Diagnostic, text: &str) -> Option<LspDiagnostic> {
@@ -209,10 +306,6 @@ fn lsp_range(range: ByteRange, text: &str) -> LspRange {
     }
 }
 
-fn full_document_range(text: &str) -> LspRange {
-    LspRange { start: Position::new(0, 0), end: offset_to_position(text, text.len()) }
-}
-
 fn clamp_range(range: ByteRange, source_len: usize) -> ByteRange {
     let start = range.start.min(source_len);
     let end = range.end.min(source_len);
@@ -243,4 +336,236 @@ fn offset_to_position(text: &str, offset: usize) -> Position {
     }
 
     Position::new(line, column)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use serde_json::json;
+    use tempfile::tempdir;
+    use tower::{Service, ServiceExt};
+
+    use super::*;
+    use crate::{ConfigOverrideArgs, GlobalConfigArgs};
+
+    fn test_config_arguments(explicit: Option<PathBuf>) -> Arc<ConfigArguments> {
+        Arc::new(ConfigArguments::from_cli_arguments(
+            GlobalConfigArgs { config: explicit, isolated: false },
+            ConfigOverrideArgs {
+                dialect: None,
+                allow: Vec::new(),
+                warn: Vec::new(),
+                deny: Vec::new(),
+            }
+            .into(),
+        ))
+    }
+
+    async fn initialize_service(service: &mut LspService<Backend>) {
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                tower_lsp::jsonrpc::Request::build("initialize")
+                    .params(json!({ "capabilities": {} }))
+                    .id(1)
+                    .finish(),
+            )
+            .await
+            .unwrap();
+
+        assert!(response.is_some(), "initialize should return a response");
+    }
+
+    async fn next_publish_diagnostics(socket: &mut tower_lsp::ClientSocket) -> serde_json::Value {
+        loop {
+            let request = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .expect("timed out waiting for server notification")
+                .expect("server notification stream ended");
+            if request.method() == "textDocument/publishDiagnostics" {
+                return request.params().cloned().expect("diagnostics request should have params");
+            }
+        }
+    }
+
+    #[test]
+    fn config_documents_are_validated_as_config_not_sql() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let diagnostics = compute_lsp_diagnostics(
+            config,
+            &uri,
+            r#"
+[core]
+dialect = "ansi"
+"#,
+        )
+        .unwrap();
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn invalid_config_documents_return_config_errors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let error = compute_lsp_diagnostics(
+            config,
+            &uri,
+            r#"
+[files]
+respect_gitigore = true
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `respect_gitigore`"));
+    }
+
+    #[test]
+    fn explicit_custom_config_paths_are_treated_as_config_documents() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom-config.toml");
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(Some(path.clone()));
+
+        assert!(is_config_document_uri(config.as_ref(), &uri));
+    }
+
+    #[test]
+    fn loaded_extended_config_paths_are_treated_as_config_documents() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("base.toml");
+        let child = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let sql = dir.path().join("query.sql");
+
+        std::fs::write(
+            &parent,
+            r#"
+[core]
+dialect = "postgres"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            r#"
+extend = "base.toml"
+"#,
+        )
+        .unwrap();
+        std::fs::write(&sql, "select 1\n").unwrap();
+
+        let config = test_config_arguments(None);
+        config.load_config(&sql).unwrap();
+
+        let parent_uri = Url::from_file_path(&parent).unwrap();
+        assert!(is_config_document_uri(config.as_ref(), &parent_uri));
+        assert!(should_invalidate_resolver_for_uri(config.as_ref(), &parent_uri));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn saving_loaded_parent_config_refreshes_open_sql_diagnostics() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("base.toml");
+        let child = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let sql = dir.path().join("query.sql");
+
+        std::fs::write(
+            &parent,
+            r#"
+[lints]
+require_order_by = { level = "allow" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            r#"
+extend = "base.toml"
+"#,
+        )
+        .unwrap();
+        std::fs::write(&sql, "SELECT * FROM foo LIMIT 10\n").unwrap();
+
+        let config = ConfigArguments::from_cli_arguments(
+            GlobalConfigArgs { config: None, isolated: false },
+            ConfigOverrideArgs {
+                dialect: None,
+                allow: Vec::new(),
+                warn: Vec::new(),
+                deny: Vec::new(),
+            }
+            .into(),
+        );
+        let (mut service, mut socket) = LspService::new(|client| Backend::new(client, config));
+        initialize_service(&mut service).await;
+
+        let sql_uri = Url::from_file_path(&sql).unwrap();
+        service
+            .inner()
+            .did_open(DidOpenTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentItem {
+                    uri: sql_uri.clone(),
+                    language_id: "sql".to_string(),
+                    version: 1,
+                    text: "SELECT * FROM foo LIMIT 10\n".to_string(),
+                },
+            })
+            .await;
+
+        let initial = next_publish_diagnostics(&mut socket).await;
+        assert_eq!(
+            initial["uri"].as_str(),
+            Some(sql_uri.as_str()),
+            "initial diagnostics should target the open SQL document"
+        );
+        assert_eq!(
+            initial["diagnostics"].as_array().map(Vec::len),
+            Some(0),
+            "initial config disables require_order_by"
+        );
+
+        std::fs::write(
+            &parent,
+            r#"
+[lints]
+require_order_by = { level = "warn" }
+"#,
+        )
+        .unwrap();
+
+        let parent_uri = Url::from_file_path(&parent).unwrap();
+        service
+            .inner()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: parent_uri },
+                text: None,
+            })
+            .await;
+
+        let refreshed = next_publish_diagnostics(&mut socket).await;
+        assert_eq!(
+            refreshed["uri"].as_str(),
+            Some(sql_uri.as_str()),
+            "saving the loaded parent config should refresh open SQL diagnostics"
+        );
+        assert_eq!(
+            refreshed["diagnostics"].as_array().map(Vec::len),
+            Some(1),
+            "refreshed diagnostics should reflect the updated parent config"
+        );
+    }
 }

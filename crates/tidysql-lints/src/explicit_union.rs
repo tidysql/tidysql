@@ -34,7 +34,7 @@ impl NodePass for ExplicitUnion {
         );
 
         if let Some(fix) = build_fix(&union_token) {
-            diagnostic = diagnostic.with_fix(fix);
+            diagnostic = diagnostic.with_fix(Self::FIX_PHASE, fix);
         }
 
         diagnostics.push(diagnostic);

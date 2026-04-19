@@ -4,15 +4,37 @@ sql = "SELECT t.id FROM foo AS t JOIN bar AS t ON t.id = t.other_id"
 expect = [{ code = "unique_table_alias" }]
 
 [[case]]
+name = "unique_table_alias_ignores_nested_subquery_scope"
+sql = "SELECT t.id FROM foo AS t WHERE EXISTS (SELECT 1 FROM bar AS t WHERE t.id = 1)"
+
+[[case]]
+name = "unique_table_alias_ignores_derived_table_scopes"
+sql = "SELECT * FROM (SELECT t.id FROM foo AS t) AS left_side JOIN (SELECT t.id FROM bar AS t) AS right_side ON left_side.id = right_side.id"
+
+[[case]]
+name = "unique_table_alias_ignores_nested_cte_body_scope"
+sql = "WITH c AS (SELECT t.id FROM foo AS t WHERE EXISTS (SELECT 1 FROM bar AS t WHERE t.id = 1)) SELECT * FROM c"
+
+[[case]]
 name = "unused_table_alias"
 sql = "SELECT id FROM foo AS f"
 expect = [{ code = "unused_table_alias" }]
 fixed_sql = "SELECT id FROM foo"
 
 [[case]]
+name = "unused_table_alias_ignores_nested_shadowed_usage"
+sql = "SELECT id FROM foo AS t WHERE EXISTS (SELECT 1 FROM bar AS t WHERE t.id = 1)"
+expect = [{ code = "unused_table_alias" }]
+fixed_sql = "SELECT id FROM foo WHERE EXISTS (SELECT 1 FROM bar AS t WHERE t.id = 1)"
+
+[[case]]
 name = "unique_column_alias"
 sql = "SELECT a AS value, b AS value FROM foo"
 expect = [{ code = "unique_column_alias" }]
+
+[[case]]
+name = "unique_column_alias_ignores_nested_subquery_scope"
+sql = "SELECT a AS value, (SELECT b AS value FROM bar) AS nested_value FROM foo"
 
 [[case]]
 name = "self_alias_column"

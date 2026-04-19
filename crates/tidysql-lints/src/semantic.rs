@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tidysql_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -34,40 +36,18 @@ pub(crate) struct StatementAnalysis {
     pub(crate) set_expression_arities: Vec<Vec<usize>>,
 }
 
+#[cfg(test)]
+static BUILD_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 impl StatementAnalysis {
     pub(crate) fn build(scope: &SyntaxNode) -> Self {
+        #[cfg(test)]
+        BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+
         let mut analysis = Self::default();
 
-        for node in scope.descendants() {
-            match node.kind() {
-                SyntaxKind::AliasExpression => {
-                    let Some(parent) = node.parent() else { continue };
-                    let Some(token) = alias_identifier(&node) else { continue };
-                    match parent.kind() {
-                        SyntaxKind::FromExpressionElement => {
-                            analysis.table_aliases.push(alias_binding(&node, token))
-                        }
-                        SyntaxKind::SelectClauseElement => {
-                            analysis.column_aliases.push(alias_binding(&node, token))
-                        }
-                        _ => {}
-                    }
-                }
-                SyntaxKind::ColumnReference => {
-                    let parts = column_reference_parts(&node);
-                    if parts.len() >= 2 {
-                        analysis.qualified_references.push(QualifiedReference {
-                            qualifier: normalized_identifier(parts[0].text()),
-                        });
-                    }
-                }
-                SyntaxKind::SetExpression => {
-                    if let Some(arities) = set_expression_arities(&node) {
-                        analysis.set_expression_arities.push(arities);
-                    }
-                }
-                _ => {}
-            }
+        if scope.kind() != SyntaxKind::WithCompoundStatement {
+            collect_scope_analysis(scope, &mut analysis);
         }
 
         if scope.kind() == SyntaxKind::WithCompoundStatement {
@@ -77,6 +57,67 @@ impl StatementAnalysis {
 
         analysis
     }
+}
+
+fn collect_scope_analysis(scope: &SyntaxNode, analysis: &mut StatementAnalysis) {
+    collect_scope_analysis_from_node(scope, scope, analysis);
+}
+
+fn collect_scope_analysis_from_node(
+    scope: &SyntaxNode,
+    node: &SyntaxNode,
+    analysis: &mut StatementAnalysis,
+) {
+    match node.kind() {
+        SyntaxKind::AliasExpression => {
+            if let (Some(parent), Some(token)) = (node.parent(), alias_identifier(node)) {
+                match parent.kind() {
+                    SyntaxKind::FromExpressionElement => {
+                        analysis.table_aliases.push(alias_binding(node, token))
+                    }
+                    SyntaxKind::SelectClauseElement => {
+                        analysis.column_aliases.push(alias_binding(node, token))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        SyntaxKind::ColumnReference => {
+            let parts = column_reference_parts(node);
+            if parts.len() >= 2 {
+                analysis
+                    .qualified_references
+                    .push(QualifiedReference { qualifier: normalized_identifier(parts[0].text()) });
+            }
+        }
+        SyntaxKind::SetExpression => {
+            if let Some(arities) = set_expression_arities(node) {
+                analysis.set_expression_arities.push(arities);
+            }
+        }
+        _ => {}
+    }
+
+    for child in node.children() {
+        if child != *scope && is_nested_statement_scope(&child) {
+            continue;
+        }
+        collect_scope_analysis_from_node(scope, &child, analysis);
+    }
+}
+
+fn is_nested_statement_scope(node: &SyntaxNode) -> bool {
+    matches!(node.kind(), SyntaxKind::SelectStatement | SyntaxKind::WithCompoundStatement)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_build_count() {
+    BUILD_COUNT.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn build_count() -> usize {
+    BUILD_COUNT.load(Ordering::Relaxed)
 }
 
 fn alias_binding(alias_expression: &SyntaxNode, token: SyntaxToken) -> AliasBinding {

@@ -32,7 +32,10 @@ impl NodePass for ElseNull {
                 ctx.config.lints.else_null.level,
                 else_clause.text_range(),
             )
-            .with_fix(Fix::single("Remove ELSE NULL", TextEdit::delete(else_clause.text_range()))),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single("Remove ELSE NULL", TextEdit::delete(else_clause.text_range())),
+            ),
         );
     }
 }
