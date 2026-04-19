@@ -2,13 +2,14 @@ use tidysql_config::NotEqualStyle;
 use tidysql_syntax::{Fix, SyntaxKind, SyntaxNode, TextEdit};
 
 use crate::casing::resolve_not_equal_style;
-use crate::{Diagnostic, LintContext, NodePass, Severity};
+use crate::{Diagnostic, FixPhase, LintContext, NodePass, Severity};
 
 pub(crate) struct NotEqualStyleRule;
 
 impl NodePass for NotEqualStyleRule {
     const CODE: &'static str = "not_equal_style";
     const TARGET: SyntaxKind = SyntaxKind::ComparisonOperator;
+    const FIX_PHASE: FixPhase = FixPhase::Style;
 
     fn level(config: &tidysql_config::Config) -> Severity {
         config.lints.not_equal_style.level
@@ -42,10 +43,13 @@ impl NodePass for NotEqualStyleRule {
                 ctx.config.lints.not_equal_style.level,
                 node.text_range(),
             )
-            .with_fix(Fix::single(
-                format!("Use {}", replacement_core),
-                TextEdit::replace(node.text_range(), replacement),
-            )),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single(
+                    format!("Use {}", replacement_core),
+                    TextEdit::replace(node.text_range(), replacement),
+                ),
+            ),
         );
     }
 }

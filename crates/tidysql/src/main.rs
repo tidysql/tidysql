@@ -482,18 +482,34 @@ fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
 }
 
 fn load_ignore_matcher(dir: &Path, file_name: &str) -> Gitignore {
+    load_ignore_matcher_with_reporter(dir, file_name, |message| eprintln!("{message}"))
+}
+
+fn load_ignore_matcher_with_reporter(
+    dir: &Path,
+    file_name: &str,
+    mut warn: impl FnMut(String),
+) -> Gitignore {
     let path = dir.join(file_name);
     if !path.is_file() {
         return Gitignore::empty();
     }
 
-    let (matcher, _error) = Gitignore::new(path);
+    let (matcher, error) = Gitignore::new(&path);
+    if let Some(error) = error {
+        warn(format!("warning: failed to parse ignore file {}: {error}", path.display()));
+    }
     matcher
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigOverrideArgs, FormatCommand, GlobalConfigArgs, format};
+    use tempfile::tempdir;
+
+    use super::{
+        ConfigOverrideArgs, FormatCommand, GlobalConfigArgs, format,
+        load_ignore_matcher_with_reporter,
+    };
 
     #[test]
     fn format_command_is_disabled() {
@@ -516,5 +532,26 @@ mod tests {
         );
 
         assert_eq!(result.unwrap_err(), "formatting is not yet implemented");
+    }
+
+    #[test]
+    fn malformed_gitignore_warns_and_keeps_valid_patterns() {
+        let dir = tempdir().unwrap();
+        let ignore_path = dir.path().join(".gitignore");
+        std::fs::write(&ignore_path, "ignored.sql\n\\\n").unwrap();
+
+        let mut warnings = Vec::new();
+        let matcher = load_ignore_matcher_with_reporter(dir.path(), ".gitignore", |message| {
+            warnings.push(message)
+        });
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("warning: failed to parse ignore file"));
+        assert!(warnings[0].contains(ignore_path.to_string_lossy().as_ref()));
+
+        let ignored = dir.path().join("ignored.sql");
+        let kept = dir.path().join("kept.sql");
+        assert!(matcher.matched_path_or_any_parents(&ignored, false).is_ignore());
+        assert!(!matcher.matched_path_or_any_parents(&kept, false).is_ignore());
     }
 }

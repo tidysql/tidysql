@@ -38,10 +38,13 @@ impl SemanticPass for UnusedTableAlias {
                     ctx.config.lints.unused_table_alias.level,
                     alias.token.text_range(),
                 )
-                .with_fix(Fix::single(
-                    "Remove unused table alias",
-                    TextEdit::delete(alias.alias_expression.text_range()),
-                )),
+                .with_fix(
+                    Self::FIX_PHASE,
+                    Fix::single(
+                        "Remove unused table alias",
+                        TextEdit::delete(alias.alias_expression.text_range()),
+                    ),
+                ),
             );
         }
     }

@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) fn current_dir() -> PathBuf {
@@ -6,47 +5,7 @@ pub(crate) fn current_dir() -> PathBuf {
 }
 
 pub(crate) fn normalize_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() { path.to_path_buf() } else { current_dir().join(path) };
-    lexical_normalize_path(&absolute)
-}
-
-fn lexical_normalize_path(path: &Path) -> PathBuf {
-    let mut prefix = None;
-    let mut has_root = false;
-    let mut parts: Vec<OsString> = Vec::new();
-
-    for component in path.components() {
-        match component {
-            Component::Prefix(value) => prefix = Some(value.as_os_str().to_os_string()),
-            Component::RootDir => has_root = true,
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if let Some(last) = parts.last()
-                    && last != ".."
-                {
-                    parts.pop();
-                    continue;
-                }
-                if !has_root {
-                    parts.push("..".into());
-                }
-            }
-            Component::Normal(part) => parts.push(part.to_os_string()),
-        }
-    }
-
-    let mut normalized = PathBuf::new();
-    if let Some(prefix) = prefix {
-        normalized.push(prefix);
-    }
-    if has_root {
-        normalized.push(Path::new(std::path::MAIN_SEPARATOR_STR));
-    }
-    for part in parts {
-        normalized.push(part);
-    }
-
-    if normalized.as_os_str().is_empty() { PathBuf::from(".") } else { normalized }
+    tidysql_config::normalize_path(path)
 }
 
 pub(crate) fn dedupe_key(path: &Path) -> PathBuf {

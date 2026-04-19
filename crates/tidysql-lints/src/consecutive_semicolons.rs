@@ -40,10 +40,10 @@ impl FilePass for ConsecutiveSemicolons {
                     ctx.config.lints.consecutive_semicolons.level,
                     token.text_range(),
                 )
-                .with_fix(Fix::single(
-                    "Remove duplicate semicolon",
-                    TextEdit::delete(token.text_range()),
-                )),
+                .with_fix(
+                    Self::FIX_PHASE,
+                    Fix::single("Remove duplicate semicolon", TextEdit::delete(token.text_range())),
+                ),
             );
             previous = Some(token);
         }

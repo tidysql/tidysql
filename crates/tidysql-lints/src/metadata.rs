@@ -371,7 +371,7 @@ order_by_direction = { level = "warn" }"#,
     },
     LintMetadata {
         code: "require_order_by",
-        summary: "Flags LIMIT or OFFSET without ORDER BY.",
+        summary: "Flags LIMIT clauses, including LIMIT ... OFFSET, without ORDER BY.",
         rationale: "Top-N queries without an explicit ordering are typically non-deterministic.",
         fixable: false,
         config_example: r#"[lints]
@@ -379,7 +379,9 @@ require_order_by = { level = "warn" }"#,
         options: &[],
         anti_pattern: "SELECT * FROM foo LIMIT 10",
         best_practices: &["SELECT * FROM foo ORDER BY id LIMIT 10"],
-        notes: &[],
+        notes: &[
+            "Standalone OFFSET is not yet parsed, so this lint does not cover OFFSET-only queries."
+        ],
         dialects: &[],
         level: level_require_order_by,
     },

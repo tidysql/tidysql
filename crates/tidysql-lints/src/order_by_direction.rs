@@ -1,12 +1,13 @@
 use tidysql_syntax::{Fix, SyntaxElement, SyntaxKind, SyntaxNode, TextEdit, TextSize};
 
-use crate::{Diagnostic, LintContext, Severity, StatementPass};
+use crate::{Diagnostic, FixPhase, LintContext, Severity, StatementPass};
 
 pub(crate) struct OrderByDirection;
 
 impl StatementPass for OrderByDirection {
     const CODE: &'static str = "order_by_direction";
     const TARGET: SyntaxKind = SyntaxKind::OrderbyClause;
+    const FIX_PHASE: FixPhase = FixPhase::Style;
 
     fn level(config: &tidysql_config::Config) -> Severity {
         config.lints.order_by_direction.level
@@ -37,7 +38,7 @@ impl StatementPass for OrderByDirection {
                 ctx.config.lints.order_by_direction.level,
                 node.text_range(),
             )
-            .with_fix(Fix::new("Add ASC to ORDER BY items", edits)),
+            .with_fix(Self::FIX_PHASE, Fix::new("Add ASC to ORDER BY items", edits)),
         );
     }
 }

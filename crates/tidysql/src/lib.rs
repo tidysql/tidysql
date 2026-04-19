@@ -1,7 +1,7 @@
 use std::fmt;
 
 use tidysql_config::Dialect;
-pub use tidysql_lints::{Diagnostic, Severity};
+pub use tidysql_lints::{Diagnostic, FixPhase, Severity};
 use tidysql_syntax::{DialectKind, EditError, Fix, ParseError, TextEdit};
 
 const CODE_UNKNOWN_DIALECT: &str = "unknown_dialect";
@@ -81,18 +81,12 @@ pub fn fix_with_config(source: &str, config: &tidysql_config::Config) -> Result<
     Ok(current)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FixPhase {
-    Structural,
-    Style,
-}
-
 fn collect_phase_fixes(diagnostics: &[Diagnostic], phase: FixPhase) -> Vec<TextEdit> {
     let mut accepted = Vec::new();
 
     for fix in diagnostics
         .iter()
-        .filter(|diagnostic| fix_phase(diagnostic.code) == phase)
+        .filter(|diagnostic| diagnostic.fix_phase == Some(phase))
         .filter_map(|diagnostic| diagnostic.fix.as_ref())
     {
         if !fix_is_compatible(fix, &accepted) {
@@ -126,13 +120,6 @@ fn edits_overlap(left: &TextEdit, right: &TextEdit) -> bool {
     let right_end = usize::from(right.range.end());
 
     left_start < right_end && right_start < left_end
-}
-
-fn fix_phase(code: &str) -> FixPhase {
-    match code {
-        "count_rows" | "keyword_case" | "not_equal_style" | "order_by_direction" => FixPhase::Style,
-        _ => FixPhase::Structural,
-    }
 }
 
 fn diagnostics_from_parse_error(error: ParseError) -> Vec<Diagnostic> {

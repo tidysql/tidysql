@@ -39,6 +39,13 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub range: Range<usize>,
     pub fix: Option<Fix>,
+    pub fix_phase: Option<FixPhase>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixPhase {
+    Structural,
+    Style,
 }
 
 impl Diagnostic {
@@ -48,7 +55,7 @@ impl Diagnostic {
         severity: Severity,
         range: Range<usize>,
     ) -> Self {
-        Self { code, message: message.into(), severity, range, fix: None }
+        Self { code, message: message.into(), severity, range, fix: None, fix_phase: None }
     }
 
     pub fn from_text_range(
@@ -60,8 +67,9 @@ impl Diagnostic {
         Self::new(code, message, severity, text_range_to_range(range))
     }
 
-    pub fn with_fix(mut self, fix: Fix) -> Self {
+    pub fn with_fix(mut self, phase: FixPhase, fix: Fix) -> Self {
         self.fix = Some(fix);
+        self.fix_phase = Some(phase);
         self
     }
 }
@@ -76,6 +84,7 @@ pub(crate) struct LintContext<'a> {
 
 pub(crate) trait TokenPass {
     const CODE: &'static str;
+    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn matches(kind: SyntaxKind) -> bool;
     fn level(config: &Config) -> Severity;
@@ -85,6 +94,7 @@ pub(crate) trait TokenPass {
 pub(crate) trait NodePass {
     const CODE: &'static str;
     const TARGET: SyntaxKind;
+    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn level(config: &Config) -> Severity;
     fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>);
@@ -93,6 +103,7 @@ pub(crate) trait NodePass {
 pub(crate) trait StatementPass {
     const CODE: &'static str;
     const TARGET: SyntaxKind;
+    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn level(config: &Config) -> Severity;
     fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>);
@@ -101,6 +112,7 @@ pub(crate) trait StatementPass {
 pub(crate) trait SemanticPass {
     const CODE: &'static str;
     const TARGET: SyntaxKind;
+    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn level(config: &Config) -> Severity;
     fn check(
@@ -113,6 +125,7 @@ pub(crate) trait SemanticPass {
 
 pub(crate) trait FilePass {
     const CODE: &'static str;
+    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn level(config: &Config) -> Severity;
     fn check(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>);
@@ -283,12 +296,17 @@ fn text_range_to_range(range: TextRange) -> Range<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use tidysql_syntax::{DialectKind, parse};
 
     use super::*;
 
+    static BUILD_COUNT_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn skips_statement_analysis_when_only_non_semantic_passes_are_enabled() {
+        let _guard = BUILD_COUNT_LOCK.lock().unwrap();
         let config = tidysql_config::Config::from_toml_str(
             r#"
 [lints]
@@ -310,6 +328,7 @@ unused_table_alias = { level = "allow" }
 
     #[test]
     fn builds_statement_analysis_for_enabled_semantic_passes() {
+        let _guard = BUILD_COUNT_LOCK.lock().unwrap();
         let config = tidysql_config::Config::from_toml_str(
             r#"
 [lints]

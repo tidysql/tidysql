@@ -44,10 +44,13 @@ impl NodePass for NullComparison {
                 ctx.config.lints.null_comparison.level,
                 node.text_range(),
             )
-            .with_fix(Fix::single(
-                "Use IS / IS NOT for NULL comparisons",
-                TextEdit::replace(node.text_range(), replacement),
-            )),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single(
+                    "Use IS / IS NOT for NULL comparisons",
+                    TextEdit::replace(node.text_range(), replacement),
+                ),
+            ),
         );
     }
 }

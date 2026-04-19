@@ -662,7 +662,7 @@ struct RawConfigFile {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RawFilesConfig {
     include: Option<Vec<String>>,
     extend_include: Option<Vec<String>>,
@@ -749,7 +749,8 @@ impl Config {
     }
 
     pub fn from_toml_str(input: &str) -> Result<Self, ConfigError> {
-        parse_config(input, None)
+        toml::from_str(input)
+            .map_err(|source| ConfigError::Toml { path: None, source: Box::new(source) })
     }
 
     pub fn set_lint_level(&mut self, lint: LintName, level: Severity) {
@@ -970,6 +971,11 @@ impl ConfigResolver {
         Self::default()
     }
 
+    pub fn has_loaded_config_path(&self, path: &Path) -> bool {
+        let path = normalize_path(path);
+        self.state.read().unwrap().configs.contains_key(&path)
+    }
+
     pub fn invalidate(&self) {
         let mut state = self.state.write().unwrap();
         state.nearest_configs.clear();
@@ -1098,7 +1104,7 @@ fn normalize_start_dir(path: &Path) -> PathBuf {
     }
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
+pub fn normalize_path(path: &Path) -> PathBuf {
     let absolute =
         if path.is_absolute() { path.to_path_buf() } else { default_base_dir().join(path) };
     lexical_normalize_path(&absolute)
@@ -1362,6 +1368,39 @@ disallow_names = { regexes = ["("] }
     }
 
     #[test]
+    fn string_config_rejects_extend_field() {
+        let error = Config::from_toml_str(
+            r#"
+extend = "parent.toml"
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("unknown field `extend`"));
+    }
+
+    #[test]
+    fn string_config_rejects_files_block() {
+        let error = Config::from_toml_str(
+            r#"
+[files]
+respect_gitignore = true
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("unknown field `files`"));
+    }
+
+    #[test]
     fn extended_configs_override_and_append_file_patterns() {
         let dir = tempdir().unwrap();
         let parent = dir.path().join("parent.toml");
@@ -1401,6 +1440,29 @@ dialect = "snowflake"
         assert!(resolved.matches_discovered_file(&dir.path().join("schema.ddl")));
         assert!(!resolved.matches_discovered_file(&dir.path().join("generated/out.sql")));
         assert!(!resolved.matches_discovered_file(&dir.path().join("vendor/out.sql")));
+    }
+
+    #[test]
+    fn resolver_rejects_unknown_files_keys() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("tidysql.toml");
+
+        fs::write(
+            &config_path,
+            r#"
+[files]
+respect_gitigore = true
+"#,
+        )
+        .unwrap();
+
+        let error = ConfigResolver::new().resolve_explicit(&config_path).unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("unknown field `respect_gitigore`"));
     }
 
     #[test]

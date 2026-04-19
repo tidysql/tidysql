@@ -1,13 +1,14 @@
 use tidysql_config::CountRowsStyle;
 use tidysql_syntax::{Fix, SyntaxKind, SyntaxNode, SyntaxToken, TextEdit};
 
-use crate::{Diagnostic, LintContext, NodePass, Severity};
+use crate::{Diagnostic, FixPhase, LintContext, NodePass, Severity};
 
 pub(crate) struct CountRows;
 
 impl NodePass for CountRows {
     const CODE: &'static str = "count_rows";
     const TARGET: SyntaxKind = SyntaxKind::Function;
+    const FIX_PHASE: FixPhase = FixPhase::Style;
 
     fn level(config: &tidysql_config::Config) -> Severity {
         config.lints.count_rows.level
@@ -44,10 +45,13 @@ impl NodePass for CountRows {
                 ctx.config.lints.count_rows.level,
                 target.text_range(),
             )
-            .with_fix(Fix::single(
-                format!("Use COUNT({})", preferred_text(preferred)),
-                TextEdit::replace(target.text_range(), preferred_text(preferred)),
-            )),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single(
+                    format!("Use COUNT({})", preferred_text(preferred)),
+                    TextEdit::replace(target.text_range(), preferred_text(preferred)),
+                ),
+            ),
         );
     }
 }

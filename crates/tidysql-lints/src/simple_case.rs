@@ -69,10 +69,13 @@ impl NodePass for SimpleCase {
                 ctx.config.lints.simple_case.level,
                 node.text_range(),
             )
-            .with_fix(Fix::single(
-                "Simplify CASE to COALESCE",
-                TextEdit::replace(node.text_range(), replacement),
-            )),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single(
+                    "Simplify CASE to COALESCE",
+                    TextEdit::replace(node.text_range(), replacement),
+                ),
+            ),
         );
     }
 }

@@ -40,10 +40,10 @@ impl NodePass for SelfAliasColumn {
                 ctx.config.lints.self_alias_column.level,
                 alias_name.text_range(),
             )
-            .with_fix(Fix::single(
-                "Remove self-alias",
-                TextEdit::delete(alias_expression.text_range()),
-            )),
+            .with_fix(
+                Self::FIX_PHASE,
+                Fix::single("Remove self-alias", TextEdit::delete(alias_expression.text_range())),
+            ),
         );
     }
 }

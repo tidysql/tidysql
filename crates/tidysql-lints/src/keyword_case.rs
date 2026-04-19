@@ -1,12 +1,13 @@
 use tidysql_syntax::{Fix, SyntaxKind, SyntaxToken, TextEdit};
 
 use crate::casing::{apply_case, is_correct_case, policy_description, resolve_keyword_policy};
-use crate::{Diagnostic, LintContext, Severity, TokenPass};
+use crate::{Diagnostic, FixPhase, LintContext, Severity, TokenPass};
 
 pub(crate) struct KeywordCase;
 
 impl TokenPass for KeywordCase {
     const CODE: &'static str = "keyword_case";
+    const FIX_PHASE: FixPhase = FixPhase::Style;
 
     fn matches(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::Keyword
@@ -40,7 +41,7 @@ impl TokenPass for KeywordCase {
                 ctx.config.lints.keyword_case.level,
                 token.text_range(),
             )
-            .with_fix(fix),
+            .with_fix(Self::FIX_PHASE, fix),
         );
     }
 }

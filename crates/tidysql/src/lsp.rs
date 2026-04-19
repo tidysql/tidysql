@@ -16,6 +16,7 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::ConfigArguments;
+use crate::paths::normalize_path;
 
 const SOURCE: &str = "tidysql";
 const CONFIG_ERROR_CODE: &str = "config_error";
@@ -188,7 +189,7 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
-        if is_config_uri(&uri) {
+        if should_invalidate_resolver_for_uri(self.config.as_ref(), &uri) {
             self.config.invalidate_resolver();
             self.refresh_open_documents().await;
             return;
@@ -223,6 +224,12 @@ fn compute_lsp_diagnostics(
     uri: &Url,
     text: &str,
 ) -> std::result::Result<Vec<LspDiagnostic>, String> {
+    if is_config_document_uri(config_arguments.as_ref(), uri) {
+        let path = uri.to_file_path().ok();
+        tidysql_config::parse_config(text, path).map_err(|err| err.to_string())?;
+        return Ok(Vec::new());
+    }
+
     let source_path = uri.to_file_path().ok();
     let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
     let config = config_arguments.load_config(source_path)?;
@@ -238,10 +245,31 @@ async fn is_latest_version(
     in_flight.read().await.get(uri).map(|task| task.version) == Some(version)
 }
 
-fn is_config_uri(uri: &Url) -> bool {
-    uri.to_file_path()
-        .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy() == "tidysql.toml"))
+fn should_invalidate_resolver_for_uri(config_arguments: &ConfigArguments, uri: &Url) -> bool {
+    is_config_document_uri(config_arguments, uri)
+}
+
+fn is_config_document_uri(config_arguments: &ConfigArguments, uri: &Url) -> bool {
+    let Ok(path) = uri.to_file_path() else {
+        return false;
+    };
+
+    is_default_config_path(&path)
+        || is_explicit_config_path(config_arguments, &path)
+        || config_arguments.resolver.has_loaded_config_path(&path)
+}
+
+fn is_default_config_path(path: &Path) -> bool {
+    path.file_name()
+        .map(|name| name.to_string_lossy() == tidysql_config::DEFAULT_CONFIG_FILE)
+        .unwrap_or(false)
+}
+
+fn is_explicit_config_path(config_arguments: &ConfigArguments, path: &Path) -> bool {
+    config_arguments
+        .config_path
+        .as_deref()
+        .map(|config_path| normalize_path(config_path) == normalize_path(path))
         .unwrap_or(false)
 }
 
@@ -308,4 +336,236 @@ fn offset_to_position(text: &str, offset: usize) -> Position {
     }
 
     Position::new(line, column)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use serde_json::json;
+    use tempfile::tempdir;
+    use tower::{Service, ServiceExt};
+
+    use super::*;
+    use crate::{ConfigOverrideArgs, GlobalConfigArgs};
+
+    fn test_config_arguments(explicit: Option<PathBuf>) -> Arc<ConfigArguments> {
+        Arc::new(ConfigArguments::from_cli_arguments(
+            GlobalConfigArgs { config: explicit, isolated: false },
+            ConfigOverrideArgs {
+                dialect: None,
+                allow: Vec::new(),
+                warn: Vec::new(),
+                deny: Vec::new(),
+            }
+            .into(),
+        ))
+    }
+
+    async fn initialize_service(service: &mut LspService<Backend>) {
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                tower_lsp::jsonrpc::Request::build("initialize")
+                    .params(json!({ "capabilities": {} }))
+                    .id(1)
+                    .finish(),
+            )
+            .await
+            .unwrap();
+
+        assert!(response.is_some(), "initialize should return a response");
+    }
+
+    async fn next_publish_diagnostics(socket: &mut tower_lsp::ClientSocket) -> serde_json::Value {
+        loop {
+            let request = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .expect("timed out waiting for server notification")
+                .expect("server notification stream ended");
+            if request.method() == "textDocument/publishDiagnostics" {
+                return request.params().cloned().expect("diagnostics request should have params");
+            }
+        }
+    }
+
+    #[test]
+    fn config_documents_are_validated_as_config_not_sql() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let diagnostics = compute_lsp_diagnostics(
+            config,
+            &uri,
+            r#"
+[core]
+dialect = "ansi"
+"#,
+        )
+        .unwrap();
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn invalid_config_documents_return_config_errors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let error = compute_lsp_diagnostics(
+            config,
+            &uri,
+            r#"
+[files]
+respect_gitigore = true
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `respect_gitigore`"));
+    }
+
+    #[test]
+    fn explicit_custom_config_paths_are_treated_as_config_documents() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom-config.toml");
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(Some(path.clone()));
+
+        assert!(is_config_document_uri(config.as_ref(), &uri));
+    }
+
+    #[test]
+    fn loaded_extended_config_paths_are_treated_as_config_documents() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("base.toml");
+        let child = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let sql = dir.path().join("query.sql");
+
+        std::fs::write(
+            &parent,
+            r#"
+[core]
+dialect = "postgres"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            r#"
+extend = "base.toml"
+"#,
+        )
+        .unwrap();
+        std::fs::write(&sql, "select 1\n").unwrap();
+
+        let config = test_config_arguments(None);
+        config.load_config(&sql).unwrap();
+
+        let parent_uri = Url::from_file_path(&parent).unwrap();
+        assert!(is_config_document_uri(config.as_ref(), &parent_uri));
+        assert!(should_invalidate_resolver_for_uri(config.as_ref(), &parent_uri));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn saving_loaded_parent_config_refreshes_open_sql_diagnostics() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("base.toml");
+        let child = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let sql = dir.path().join("query.sql");
+
+        std::fs::write(
+            &parent,
+            r#"
+[lints]
+require_order_by = { level = "allow" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            r#"
+extend = "base.toml"
+"#,
+        )
+        .unwrap();
+        std::fs::write(&sql, "SELECT * FROM foo LIMIT 10\n").unwrap();
+
+        let config = ConfigArguments::from_cli_arguments(
+            GlobalConfigArgs { config: None, isolated: false },
+            ConfigOverrideArgs {
+                dialect: None,
+                allow: Vec::new(),
+                warn: Vec::new(),
+                deny: Vec::new(),
+            }
+            .into(),
+        );
+        let (mut service, mut socket) = LspService::new(|client| Backend::new(client, config));
+        initialize_service(&mut service).await;
+
+        let sql_uri = Url::from_file_path(&sql).unwrap();
+        service
+            .inner()
+            .did_open(DidOpenTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentItem {
+                    uri: sql_uri.clone(),
+                    language_id: "sql".to_string(),
+                    version: 1,
+                    text: "SELECT * FROM foo LIMIT 10\n".to_string(),
+                },
+            })
+            .await;
+
+        let initial = next_publish_diagnostics(&mut socket).await;
+        assert_eq!(
+            initial["uri"].as_str(),
+            Some(sql_uri.as_str()),
+            "initial diagnostics should target the open SQL document"
+        );
+        assert_eq!(
+            initial["diagnostics"].as_array().map(Vec::len),
+            Some(0),
+            "initial config disables require_order_by"
+        );
+
+        std::fs::write(
+            &parent,
+            r#"
+[lints]
+require_order_by = { level = "warn" }
+"#,
+        )
+        .unwrap();
+
+        let parent_uri = Url::from_file_path(&parent).unwrap();
+        service
+            .inner()
+            .did_save(DidSaveTextDocumentParams {
+                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: parent_uri },
+                text: None,
+            })
+            .await;
+
+        let refreshed = next_publish_diagnostics(&mut socket).await;
+        assert_eq!(
+            refreshed["uri"].as_str(),
+            Some(sql_uri.as_str()),
+            "saving the loaded parent config should refresh open SQL diagnostics"
+        );
+        assert_eq!(
+            refreshed["diagnostics"].as_array().map(Vec::len),
+            Some(1),
+            "refreshed diagnostics should reflect the updated parent config"
+        );
+    }
 }
