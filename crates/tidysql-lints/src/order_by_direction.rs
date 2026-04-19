@@ -1,6 +1,5 @@
 use tidysql_syntax::{Fix, SyntaxElement, SyntaxKind, SyntaxNode, TextEdit, TextSize};
 
-use crate::semantic::StatementAnalysis;
 use crate::{Diagnostic, LintContext, Severity, StatementPass};
 
 pub(crate) struct OrderByDirection;
@@ -13,12 +12,7 @@ impl StatementPass for OrderByDirection {
         config.lints.order_by_direction.level
     }
 
-    fn check(
-        ctx: &LintContext<'_>,
-        node: &SyntaxNode,
-        _analysis: &StatementAnalysis,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
+    fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>) {
         let items = order_by_items(node);
         if items.len() < 2 {
             return;

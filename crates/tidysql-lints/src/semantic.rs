@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tidysql_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -34,8 +36,14 @@ pub(crate) struct StatementAnalysis {
     pub(crate) set_expression_arities: Vec<Vec<usize>>,
 }
 
+#[cfg(test)]
+static BUILD_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 impl StatementAnalysis {
     pub(crate) fn build(scope: &SyntaxNode) -> Self {
+        #[cfg(test)]
+        BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+
         let mut analysis = Self::default();
 
         for node in scope.descendants() {
@@ -77,6 +85,16 @@ impl StatementAnalysis {
 
         analysis
     }
+}
+
+#[cfg(test)]
+pub(crate) fn reset_build_count() {
+    BUILD_COUNT.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn build_count() -> usize {
+    BUILD_COUNT.load(Ordering::Relaxed)
 }
 
 fn alias_binding(alias_expression: &SyntaxNode, token: SyntaxToken) -> AliasBinding {

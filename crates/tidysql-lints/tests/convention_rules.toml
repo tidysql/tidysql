@@ -18,6 +18,11 @@ expect = [{ code = "count_rows" }]
 fixed_sql = "SELECT COUNT(*) FROM foo"
 
 [[case]]
+name = "count_rows_ignores_nested_literals"
+sql = "SELECT COUNT(CASE WHEN x THEN 1 ELSE 0 END) FROM foo"
+expect = []
+
+[[case]]
 name = "order_by_direction_requires_all_items"
 sql = "SELECT a, b FROM foo ORDER BY a, b DESC"
 expect = [{ code = "order_by_direction" }]

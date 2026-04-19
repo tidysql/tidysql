@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
@@ -19,6 +20,11 @@ use crate::ConfigArguments;
 const SOURCE: &str = "tidysql";
 const CONFIG_ERROR_CODE: &str = "config_error";
 type DocumentState = (String, i32);
+
+struct AnalysisTask {
+    version: i32,
+    handle: JoinHandle<()>,
+}
 
 pub fn run(config: ConfigArguments) -> std::result::Result<(), String> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -40,13 +46,19 @@ async fn run_async(config: ConfigArguments) -> std::result::Result<(), String> {
 
 struct Backend {
     client: Client,
-    documents: RwLock<HashMap<Url, DocumentState>>,
+    documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
+    in_flight: Arc<RwLock<HashMap<Url, AnalysisTask>>>,
     config: Arc<ConfigArguments>,
 }
 
 impl Backend {
     fn new(client: Client, config: ConfigArguments) -> Self {
-        Self { client, documents: RwLock::new(HashMap::new()), config: Arc::new(config) }
+        Self {
+            client,
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            in_flight: Arc::new(RwLock::new(HashMap::new())),
+            config: Arc::new(config),
+        }
     }
 
     fn config_error_diagnostic(message: String) -> LspDiagnostic {
@@ -58,29 +70,6 @@ impl Backend {
             message,
             ..Default::default()
         }
-    }
-
-    async fn publish_diagnostics(&self, uri: Url, text: &str, version: i32) {
-        let config = match self.load_config(&uri).await {
-            Ok(config) => config,
-            Err(message) => {
-                let diagnostic = Self::config_error_diagnostic(message);
-                self.client.publish_diagnostics(uri, vec![diagnostic], Some(version)).await;
-                return;
-            }
-        };
-        let diagnostics = tidysql::check_with_config(text, &config);
-        let lsp_diagnostics = diagnostics
-            .iter()
-            .filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text))
-            .collect();
-        self.client.publish_diagnostics(uri, lsp_diagnostics, Some(version)).await;
-    }
-
-    async fn load_config(&self, uri: &Url) -> std::result::Result<tidysql_config::Config, String> {
-        let source_path = uri.to_file_path().ok();
-        let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
-        self.config.load_config(source_path)
     }
 
     async fn load_text(&self, uri: &Url) -> Option<(String, i32)> {
@@ -95,7 +84,63 @@ impl Backend {
 
     async fn update_document(&self, uri: Url, text: String, version: i32) {
         self.documents.write().await.insert(uri.clone(), (text.clone(), version));
-        self.publish_diagnostics(uri, &text, version).await;
+        self.schedule_diagnostics(uri, text, version).await;
+    }
+
+    async fn schedule_diagnostics(&self, uri: Url, text: String, version: i32) {
+        let handle = self.spawn_diagnostics_task(uri.clone(), text, version);
+        if let Some(previous) =
+            self.in_flight.write().await.insert(uri, AnalysisTask { version, handle })
+        {
+            previous.handle.abort();
+        }
+    }
+
+    fn spawn_diagnostics_task(&self, uri: Url, text: String, version: i32) -> JoinHandle<()> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        let in_flight = self.in_flight.clone();
+
+        tokio::spawn(async move {
+            let diagnostics = match tokio::task::spawn_blocking({
+                let uri = uri.clone();
+                move || compute_lsp_diagnostics(config, &uri, &text)
+            })
+            .await
+            {
+                Ok(Ok(diagnostics)) => diagnostics,
+                Ok(Err(message)) => vec![Backend::config_error_diagnostic(message)],
+                Err(_) => return,
+            };
+
+            if !is_latest_version(&in_flight, &uri, version).await {
+                return;
+            }
+
+            client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+
+            let mut tasks = in_flight.write().await;
+            if tasks.get(&uri).map(|task| task.version) == Some(version) {
+                tasks.remove(&uri);
+            }
+        })
+    }
+
+    async fn refresh_open_documents(&self) {
+        let open_documents = self.documents.read().await.clone();
+        for (uri, (text, version)) in open_documents {
+            self.schedule_diagnostics(uri, text, version).await;
+        }
+    }
+
+    async fn abort_in_flight(&self, uri: &Url) {
+        if let Some(task) = self.in_flight.write().await.remove(uri) {
+            task.handle.abort();
+        }
+    }
+
+    async fn document_version(&self, uri: &Url) -> i32 {
+        self.documents.read().await.get(uri).map(|(_, version)| *version).unwrap_or(0)
     }
 }
 
@@ -143,8 +188,15 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
+        if is_config_uri(&uri) {
+            self.config.invalidate_resolver();
+            self.refresh_open_documents().await;
+            return;
+        }
+
+        let version = self.document_version(&uri).await;
         let text = match params.text {
-            Some(text) => Some((text, 0i32)),
+            Some(text) => Some((text, version)),
             None => self.load_text(&uri).await,
         };
 
@@ -156,24 +208,41 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.documents.write().await.remove(&uri);
+        self.abort_in_flight(&uri).await;
         self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let uri = params.text_document.uri;
-        let Some((text, _version)) = self.load_text(&uri).await else {
-            return Ok(None);
-        };
-
-        let Ok(config) = self.load_config(&uri).await else {
-            return Ok(None);
-        };
-        let Ok(formatted) = tidysql::format_with_config(&text, &config) else {
-            return Ok(None);
-        };
-        let range = full_document_range(&text);
-        Ok(Some(vec![TextEdit { range, new_text: formatted }]))
+        let _ = params;
+        Ok(None)
     }
+}
+
+fn compute_lsp_diagnostics(
+    config_arguments: Arc<ConfigArguments>,
+    uri: &Url,
+    text: &str,
+) -> std::result::Result<Vec<LspDiagnostic>, String> {
+    let source_path = uri.to_file_path().ok();
+    let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let diagnostics = tidysql::check_with_config(text, &config);
+    Ok(diagnostics.iter().filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text)).collect())
+}
+
+async fn is_latest_version(
+    in_flight: &Arc<RwLock<HashMap<Url, AnalysisTask>>>,
+    uri: &Url,
+    version: i32,
+) -> bool {
+    in_flight.read().await.get(uri).map(|task| task.version) == Some(version)
+}
+
+fn is_config_uri(uri: &Url) -> bool {
+    uri.to_file_path()
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy() == "tidysql.toml"))
+        .unwrap_or(false)
 }
 
 fn to_lsp_diagnostic(diagnostic: &tidysql::Diagnostic, text: &str) -> Option<LspDiagnostic> {
@@ -207,10 +276,6 @@ fn lsp_range(range: ByteRange, text: &str) -> LspRange {
         start: offset_to_position(text, range.start),
         end: offset_to_position(text, range.end),
     }
-}
-
-fn full_document_range(text: &str) -> LspRange {
-    LspRange { start: Position::new(0, 0), end: offset_to_position(text, text.len()) }
 }
 
 fn clamp_range(range: ByteRange, source_len: usize) -> ByteRange {

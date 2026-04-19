@@ -12,6 +12,9 @@ tidysql-config = { workspace = true }
 clap = { workspace = true }
 annotate-snippets = { workspace = true }
 tempfile = { workspace = true }
+crossbeam-channel = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }

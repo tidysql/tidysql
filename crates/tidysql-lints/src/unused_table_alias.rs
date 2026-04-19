@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use tidysql_syntax::{Fix, SyntaxKind, TextEdit};
 
 use crate::semantic::StatementAnalysis;
-use crate::{Diagnostic, LintContext, Severity, StatementPass};
+use crate::{Diagnostic, LintContext, SemanticPass, Severity};
 
 pub(crate) struct UnusedTableAlias;
 
-impl StatementPass for UnusedTableAlias {
+impl SemanticPass for UnusedTableAlias {
     const CODE: &'static str = "unused_table_alias";
     const TARGET: SyntaxKind = SyntaxKind::SelectStatement;
 

@@ -53,9 +53,21 @@ impl NodePass for CountRows {
 }
 
 fn replacement_target(function: &SyntaxNode) -> Option<SyntaxToken> {
-    function.descendants_with_tokens().find_map(|element| match element {
+    let bracketed = function
+        .children()
+        .find(|child| child.kind() == SyntaxKind::FunctionContents)?
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Bracketed)?;
+    let text = bracketed.text();
+    let inner = text.strip_prefix('(')?.strip_suffix(')')?.trim();
+    if !matches!(inner, "*" | "0" | "1") {
+        return None;
+    }
+
+    bracketed.descendants_with_tokens().find_map(|element| match element {
         tidysql_syntax::SyntaxElement::Token(token)
-            if token.kind() == SyntaxKind::Star || token.kind() == SyntaxKind::NumericLiteral =>
+            if (token.kind() == SyntaxKind::Star || token.kind() == SyntaxKind::NumericLiteral)
+                && token.text().trim() == inner =>
         {
             Some(token)
         }

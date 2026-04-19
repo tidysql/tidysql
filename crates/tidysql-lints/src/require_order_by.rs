@@ -1,6 +1,5 @@
 use tidysql_syntax::{SyntaxKind, SyntaxNode};
 
-use crate::semantic::StatementAnalysis;
 use crate::{Diagnostic, LintContext, Severity, StatementPass};
 
 pub(crate) struct RequireOrderBy;
@@ -13,12 +12,7 @@ impl StatementPass for RequireOrderBy {
         config.lints.require_order_by.level
     }
 
-    fn check(
-        ctx: &LintContext<'_>,
-        node: &SyntaxNode,
-        _analysis: &StatementAnalysis,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
+    fn check(ctx: &LintContext<'_>, node: &SyntaxNode, diagnostics: &mut Vec<Diagnostic>) {
         let has_limit = node.children().any(|child| child.kind() == SyntaxKind::LimitClause);
         let has_order_by = node.children().any(|child| child.kind() == SyntaxKind::OrderbyClause);
         if !has_limit || has_order_by {
