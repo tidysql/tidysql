@@ -148,7 +148,7 @@ fn process_format_check(
     strict: bool,
 ) -> FileOutcome {
     match format_source(&input, config, strict) {
-        Ok(formatted) => FileOutcome::FormatCheck { needs_rewrite: formatted != input },
+        Ok(formatted) => FileOutcome::FormatCheck { original: input, formatted },
         Err(error) => FileOutcome::Error(error.to_string()),
     }
 }

@@ -51,13 +51,13 @@ tidysql check query.sql -D explicit_union -A disallow_names
 ### Format
 
 ```bash
-# Format a file to stdout
+# Format a file in place
 tidysql format query.sql
 
-# Rewrite files in place
-tidysql format queries/ --write
+# Format files in place
+tidysql format queries/
 
-# Check whether files are already formatted
+# Check whether files are already formatted and print a diff
 tidysql format queries/ --check
 
 # Fail if any unsupported statement is encountered
@@ -79,7 +79,7 @@ unused CTEs, and redundant ELSE NULL branches.
 On save or on demand, run the formatter:
 
 ```bash
-tidysql format query.sql --write
+tidysql format query.sql
 ```
 
 When you want intentional source rewrites, run lint fixes:

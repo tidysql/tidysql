@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::{BatchCommandKind, FileOutcome, FileResult};
 use crate::diagnostics::{check_diagnostics, emit_diagnostics};
+use crate::diff::emit_format_diff;
 
 #[derive(Default)]
 struct BatchSummary {
@@ -81,9 +82,9 @@ fn handle_result(result: &FileResult, command: BatchCommandKind, summary: &mut B
                 summary.had_check_diagnostics = true;
             }
         }
-        FileOutcome::FormatCheck { needs_rewrite } => {
-            if *needs_rewrite {
-                eprintln!("{}", result.display_path);
+        FileOutcome::FormatCheck { original, formatted } => {
+            if formatted != original {
+                emit_format_diff(&result.display_path, original, formatted);
                 summary.had_format_differences = true;
             }
         }

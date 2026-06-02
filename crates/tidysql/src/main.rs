@@ -13,6 +13,7 @@ use crate::paths::{display_path, normalize_path};
 
 mod batch;
 mod diagnostics;
+mod diff;
 mod lsp;
 mod paths;
 
@@ -70,8 +71,6 @@ struct FormatCommand {
     inputs: Vec<PathBuf>,
     #[arg(long, value_name = "PATTERN")]
     glob: Vec<String>,
-    #[arg(long)]
-    write: bool,
     #[arg(long)]
     check: bool,
     #[arg(long)]
@@ -326,10 +325,6 @@ fn main() {
 }
 
 fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
-    if args.write && args.check {
-        return Err("format mode conflict: choose either --write or --check".to_string());
-    }
-
     let plan = execution_plan(&args.inputs, &args.glob)?;
     let config_arguments = config_arguments(global_options, args.config_overrides.clone());
 
@@ -337,16 +332,10 @@ fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), S
         ExecutionPlan::Stdin => format_stdin(args, &config_arguments),
         ExecutionPlan::SingleFile(path) => format_single_file(path, args, &config_arguments),
         ExecutionPlan::Batch(plan) => {
-            if !args.write && !args.check {
-                return Err("batch format requires either --write or --check to avoid \
-                            concatenating files to stdout"
-                    .to_string());
-            }
-
-            let mode = if args.write {
-                BatchCommandKind::FormatWrite { strict: args.strict }
-            } else {
+            let mode = if args.check {
                 BatchCommandKind::FormatCheck { strict: args.strict }
+            } else {
+                BatchCommandKind::FormatWrite { strict: args.strict }
             };
             run_batch(plan, mode, args.jobs, &config_arguments)
         }
@@ -371,16 +360,13 @@ fn serve_lsp(args: LspCommand, global_options: GlobalConfigArgs) -> Result<(), S
 }
 
 fn format_stdin(args: FormatCommand, config_arguments: &ConfigArguments) -> Result<(), String> {
-    if args.write {
-        return Err("cannot use --write when reading from stdin".to_string());
-    }
-
-    let LoadedSource { input, config, .. } =
+    let LoadedSource { input, config, display_path, .. } =
         load_source(None, args.stdin_filename.as_deref(), config_arguments)?;
     let formatted = format_source(&input, &config, args.strict)?;
 
     if args.check {
         if formatted != input {
+            diff::emit_format_diff(&display_path, &input, &formatted);
             return Err("format check failed: stdin would be reformatted".to_string());
         }
         return Ok(());
@@ -400,21 +386,17 @@ fn format_single_file(
 
     if args.check {
         if formatted != input {
-            eprintln!("{display_path}");
+            diff::emit_format_diff(&display_path, &input, &formatted);
             return Err("format check failed: files require formatting".to_string());
         }
         return Ok(());
     }
 
-    if args.write {
-        let path = source_path.as_deref().ok_or_else(|| "missing file path".to_string())?;
-        if formatted != input {
-            atomic_write(path, &formatted).map_err(|err| err.to_string())?;
-        }
-        return Ok(());
+    let path = source_path.as_deref().ok_or_else(|| "missing file path".to_string())?;
+    if formatted != input {
+        atomic_write(path, &formatted).map_err(|err| err.to_string())?;
     }
-
-    write_output(&formatted).map_err(|err| err.to_string())
+    Ok(())
 }
 
 fn format_source(
@@ -561,6 +543,16 @@ mod tests {
     }
 
     #[test]
+    fn format_rejects_write_flag() {
+        let error = match Cli::try_parse_from(["tidysql", "format", "--write", "query.sql"]) {
+            Ok(_) => panic!("format should reject --write"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("unexpected argument '--write'"));
+    }
+
+    #[test]
     fn check_accepts_lint_override_flags() {
         let cli =
             Cli::try_parse_from(["tidysql", "check", "-W", "explicit_union", "query.sql"]).unwrap();
@@ -569,18 +561,17 @@ mod tests {
     }
 
     #[test]
-    fn format_batch_stdout_requires_write_or_check() {
+    fn format_batch_defaults_to_rewriting_files() {
         let dir = tempdir().unwrap();
         let one = dir.path().join("one.sql");
         let two = dir.path().join("two.sql");
         std::fs::write(&one, "select a from foo").unwrap();
         std::fs::write(&two, "select b from bar").unwrap();
 
-        let result = format(
+        format(
             FormatCommand {
-                inputs: vec![one, two],
+                inputs: vec![one.clone(), two.clone()],
                 glob: Vec::new(),
-                write: false,
                 check: false,
                 strict: false,
                 jobs: None,
@@ -588,17 +579,15 @@ mod tests {
                 config_overrides: empty_core_overrides(),
             },
             GlobalConfigArgs { config: None, isolated: false },
-        );
+        )
+        .unwrap();
 
-        assert_eq!(
-            result.unwrap_err(),
-            "batch format requires either --write or --check to avoid concatenating files to \
-             stdout"
-        );
+        assert_eq!(std::fs::read_to_string(one).unwrap(), "SELECT a\nFROM foo");
+        assert_eq!(std::fs::read_to_string(two).unwrap(), "SELECT b\nFROM bar");
     }
 
     #[test]
-    fn format_single_file_write_rewrites_file() {
+    fn format_single_file_rewrites_file_by_default() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("query.sql");
         std::fs::write(&path, "select a,b from foo").unwrap();
@@ -612,7 +601,6 @@ mod tests {
             FormatCommand {
                 inputs: Vec::new(),
                 glob: Vec::new(),
-                write: true,
                 check: false,
                 strict: false,
                 jobs: None,
@@ -641,7 +629,6 @@ mod tests {
             FormatCommand {
                 inputs: Vec::new(),
                 glob: Vec::new(),
-                write: false,
                 check: true,
                 strict: false,
                 jobs: None,
@@ -669,7 +656,6 @@ mod tests {
             FormatCommand {
                 inputs: Vec::new(),
                 glob: Vec::new(),
-                write: true,
                 check: false,
                 strict: false,
                 jobs: None,
@@ -698,7 +684,6 @@ mod tests {
             FormatCommand {
                 inputs: Vec::new(),
                 glob: Vec::new(),
-                write: true,
                 check: false,
                 strict: true,
                 jobs: None,

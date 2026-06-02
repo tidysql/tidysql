@@ -26,6 +26,7 @@ tower-lsp = "0.20"
 crossbeam-channel = "0.5"
 globset = "0.4"
 ignore = "0.4"
+similar = "2.7"
 tidysql = { path = "crates/tidysql" }
 tidysql-config = { path = "crates/tidysql-config" }
 tidysql-formatter = { path = "crates/tidysql-formatter" }

@@ -37,7 +37,7 @@ pub(crate) struct FileResult {
 
 pub(crate) enum FileOutcome {
     Check { source: String, diagnostics: Vec<tidysql::Diagnostic> },
-    FormatCheck { needs_rewrite: bool },
+    FormatCheck { original: String, formatted: String },
     Success,
     Error(String),
 }
