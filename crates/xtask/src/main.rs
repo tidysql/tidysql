@@ -82,7 +82,8 @@ fn render_index_page(lints: &[(&LintMetadata, &str)]) -> String {
     for (lint, default_level) in lints {
         let fixable = if lint.fixable { "yes" } else { "no" };
         output.push_str(&format!(
-            "| [`{code}`]({code}.md) | `{category}` | `{editor}` | `{default}` | {fixable} | {summary} |\n",
+            "| [`{code}`]({code}.md) | `{category}` | `{editor}` | `{default}` | {fixable} | \
+             {summary} |\n",
             code = lint.code,
             category = lint.category.as_str(),
             editor = lint.editor_default.as_str(),

@@ -592,7 +592,8 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            "batch format requires either --write or --check to avoid concatenating files to stdout"
+            "batch format requires either --write or --check to avoid concatenating files to \
+             stdout"
         );
     }
 

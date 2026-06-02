@@ -972,10 +972,10 @@ fn split_case_clauses(tokens: &[PrintToken]) -> Vec<&[PrintToken]> {
     let mut start = None;
 
     for (index, token) in tokens.iter().enumerate() {
-        if is_keyword_text(token, "when") || is_keyword_text(token, "else") {
-            if let Some(previous) = start.replace(index) {
-                clauses.push(trim_print_tokens(&tokens[previous..index]));
-            }
+        if (is_keyword_text(token, "when") || is_keyword_text(token, "else"))
+            && let Some(previous) = start.replace(index)
+        {
+            clauses.push(trim_print_tokens(&tokens[previous..index]));
         }
     }
 
@@ -1172,16 +1172,8 @@ fn is_comment(kind: SyntaxKind) -> bool {
 }
 
 fn comments_doc(comments: Vec<SyntaxToken>) -> DynDoc {
-    let docs = comments
-        .into_iter()
-        .map(|comment| {
-            if comment.kind() == SyntaxKind::InlineComment {
-                seq([txt(comment.text()), hard()])
-            } else {
-                seq([txt(comment.text()), hard()])
-            }
-        })
-        .collect::<Vec<_>>();
+    let docs =
+        comments.into_iter().map(|comment| seq([txt(comment.text()), hard()])).collect::<Vec<_>>();
     seq(docs)
 }
 
@@ -1442,7 +1434,8 @@ mod tests {
         let config = Format { line_width: 10, ..Format::default() };
         assert_eq!(
             fmt_with("select coalesce(long_name, fallback_value, final_value) from foo", config),
-            "SELECT\n    coalesce(\n        long_name,\n        fallback_value,\n        final_value\n    )\nFROM foo"
+            "SELECT\n    coalesce(\n        long_name,\n        fallback_value,\n        \
+             final_value\n    )\nFROM foo"
         );
     }
 
@@ -1463,7 +1456,8 @@ mod tests {
                 "select case when a=1 then 'x' when b=2 then 'y' else 'z' end as label from foo",
                 config
             ),
-            "SELECT\n    CASE\n        WHEN a = 1 THEN 'x'\n        WHEN b = 2 THEN 'y'\n        ELSE 'z'\n    END AS label\nFROM foo"
+            "SELECT\n    CASE\n        WHEN a = 1 THEN 'x'\n        WHEN b = 2 THEN 'y'\n        \
+             ELSE 'z'\n    END AS label\nFROM foo"
         );
     }
 
@@ -1475,7 +1469,8 @@ mod tests {
                 "select a from foo join bar on foo.id=bar.foo_id join baz on bar.id=baz.bar_id",
                 config
             ),
-            "SELECT a\nFROM\n    foo\n    JOIN bar ON foo.id = bar.foo_id\n    JOIN baz ON bar.id = baz.bar_id"
+            "SELECT a\nFROM\n    foo\n    JOIN bar ON foo.id = bar.foo_id\n    JOIN baz ON bar.id \
+             = baz.bar_id"
         );
     }
 
@@ -1487,7 +1482,8 @@ mod tests {
                 "with a as (select x from foo), b as (select y from bar) select x,y from a",
                 config
             ),
-            "WITH\n    a AS (\n        SELECT x\n        FROM foo\n    ),\n    b AS (\n        SELECT y\n        FROM bar\n    )\nSELECT x, y\nFROM a"
+            "WITH\n    a AS (\n        SELECT x\n        FROM foo\n    ),\n    b AS (\n        \
+             SELECT y\n        FROM bar\n    )\nSELECT x, y\nFROM a"
         );
     }
 

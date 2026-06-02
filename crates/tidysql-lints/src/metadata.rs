@@ -217,7 +217,8 @@ keyword_case = { policy = "upper" }"#,
         notes: &[
             "tidysql check does not emit keyword_case diagnostics.",
             "Use [format] keyword_case to configure casing for tidysql format and format --check.",
-            "Old policies upper and lower are translated to format.keyword_case when no explicit formatter keyword_case is set.",
+            "Old policies upper and lower are translated to format.keyword_case when no explicit \
+             formatter keyword_case is set.",
         ],
         dialects: &[],
         level: level_keyword_case,
@@ -439,7 +440,7 @@ require_order_by = { level = "warn" }"#,
         anti_pattern: "SELECT * FROM foo LIMIT 10",
         best_practices: &["SELECT * FROM foo ORDER BY id LIMIT 10"],
         notes: &[
-            "Standalone OFFSET is not yet parsed, so this lint does not cover OFFSET-only queries.",
+            "Standalone OFFSET is not yet parsed, so this lint does not cover OFFSET-only queries."
         ],
         dialects: &[],
         level: level_require_order_by,
