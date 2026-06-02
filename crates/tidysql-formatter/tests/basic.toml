@@ -1,0 +1,35 @@
+[[case]]
+name = "simple_select"
+sql = "select a from foo"
+expected = """
+SELECT a
+FROM foo"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "trailing_comma_select_list"
+sql = "select a,b,c from foo"
+expected = """
+SELECT a, b, c
+FROM foo"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "leading_comma_select_list_flat"
+sql = "select a,b,c from foo"
+config = { comma_style = "leading" }
+expected = """
+SELECT a, b, c
+FROM foo"""
+
+[[case]]
+name = "preserves_final_newline"
+sql = """
+select a from foo
+"""
+expected = """
+SELECT a
+FROM foo
+"""

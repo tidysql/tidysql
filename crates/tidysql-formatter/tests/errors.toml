@@ -1,0 +1,15 @@
+[[case]]
+name = "parse_errors_are_returned"
+sql = "select from foo"
+expect_error = { kind = "parse" }
+
+[[case]]
+name = "unsupported_statement_is_preserved_by_default"
+sql = "insert into foo values (1)"
+expected = "insert into foo values (1)"
+
+[[case]]
+name = "unsupported_statement_errors_in_strict_mode"
+sql = "insert into foo values (1)"
+mode = "strict"
+expect_error = { kind = "unsupported", syntax_kind = "InsertStatement" }

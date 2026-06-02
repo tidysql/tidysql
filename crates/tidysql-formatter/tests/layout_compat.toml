@@ -1,0 +1,205 @@
+[[case]]
+name = "using_clause_gets_space_before_bracket"
+sql = "select * from a join b using(x)"
+expected = """
+SELECT *
+FROM a JOIN b USING (x)"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "cte_as_gets_space_before_bracket"
+sql = "with a as(select 1) select * from a"
+expected = """
+WITH
+    a AS (
+        SELECT 1
+    )
+SELECT *
+FROM a"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "function_calls_keep_tight_brackets"
+sql = "select sum(x), coalesce(y,z) from t"
+expected = """
+SELECT sum(x), coalesce(y, z)
+FROM t"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "bracketed_expression_spaces_before_alias"
+sql = "select (a+b) as c from acceptable_buckets"
+expected = """
+SELECT (a + b) AS c
+FROM acceptable_buckets"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "comment_only_line_aligns_with_select_target"
+sql = """
+SELECT
+  -- Compute the thing
+  (a+b) AS c
+FROM
+  acceptable_buckets
+"""
+expected = """
+SELECT
+    -- Compute the thing
+    (a + b) AS c
+FROM acceptable_buckets
+"""
+idempotent = true
+preserve_structure = true
+all_comments_formatted = true
+
+[[case]]
+name = "single_select_target_stays_compact"
+sql = """
+select
+    a
+from x
+"""
+expected = """
+SELECT a
+FROM x
+"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "multiple_select_targets_break_under_width"
+sql = "select a, b, c from x"
+config = { line_width = 12 }
+expected = """
+SELECT
+    a,
+    b,
+    c
+FROM x"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "comments_around_single_select_target_are_preserved"
+sql = """
+SELECT
+  -- previous comment
+  1 -- this is a comment
+FROM
+  my_table
+"""
+expected = """
+SELECT
+    -- previous comment
+    1
+    -- this is a comment
+FROM my_table
+"""
+idempotent = true
+preserve_structure = true
+all_comments_formatted = true
+
+[[case]]
+name = "block_comment_before_select_target_is_preserved"
+sql = "select /* keep me */ a from foo"
+expected = """
+SELECT
+    /* keep me */
+    a
+FROM foo"""
+idempotent = true
+preserve_structure = true
+all_comments_formatted = true
+
+[[case]]
+name = "major_clauses_break_onto_new_lines"
+sql = "select foo from bar where x = 4 group by y having count(*) > 1 order by y"
+expected = """
+SELECT foo
+FROM bar
+WHERE x = 4
+GROUP BY y
+HAVING count(*) > 1
+ORDER BY y"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "join_chain_breaks_under_narrow_width"
+sql = "select * from foo join bar on foo.id=bar.foo_id join baz on bar.id=baz.bar_id"
+config = { line_width = 32 }
+expected = """
+SELECT *
+FROM
+    foo
+    JOIN bar ON foo.id = bar.foo_id
+    JOIN baz ON bar.id = baz.bar_id"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "boolean_expression_breaks_under_narrow_width"
+sql = "select * from foo where a=1 and b=2 or (c=3 and d=4)"
+config = { line_width = 24 }
+expected = """
+SELECT *
+FROM foo
+WHERE
+    a = 1
+    AND b = 2
+    OR (c = 3 AND d = 4)"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "boolean_expression_preserves_inline_comment"
+sql = """
+select * from foo where a=1 -- left side
+and b=2
+"""
+expected = """
+SELECT *
+FROM foo
+WHERE
+    a = 1 -- left side
+    AND b = 2
+"""
+idempotent = true
+preserve_structure = true
+all_comments_formatted = true
+
+[[case]]
+name = "case_expression_breaks_under_narrow_width"
+sql = "select case when a=1 then 'x' when b=2 then 'y' else 'z' end as label from foo"
+config = { line_width = 32 }
+expected = """
+SELECT
+    CASE
+        WHEN a = 1 THEN 'x'
+        WHEN b = 2 THEN 'y'
+        ELSE 'z'
+    END AS label
+FROM foo"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "nested_brackets_and_function_args_break_under_narrow_width"
+sql = "select coalesce(foo, bar, baz), (a+(b*c)) as value from tbl"
+config = { line_width = 24 }
+expected = """
+SELECT
+    coalesce(
+        foo,
+        bar,
+        baz
+    ),
+    (a + (b * c)) AS value
+FROM tbl"""
+idempotent = true
+preserve_structure = true

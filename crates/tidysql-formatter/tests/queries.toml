@@ -1,0 +1,43 @@
+[[case]]
+name = "formats_cte"
+sql = "with cte as (select a from foo) select a from cte"
+expected = """
+WITH
+    cte AS (
+        SELECT a
+        FROM foo
+    )
+SELECT a
+FROM cte"""
+idempotent = true
+preserve_structure = true
+
+[[case]]
+name = "formats_join_where_order_limit"
+sql = "select a from t join u on t.id=u.id where a=1 order by a desc limit 5"
+expected = """
+SELECT a
+FROM t JOIN u ON t.id = u.id
+WHERE a = 1
+ORDER BY a DESC
+LIMIT 5"""
+
+[[case]]
+name = "formats_functions_and_case"
+sql = "select sum(foo), case when a=1 then 'x' else 'y' end as label from t"
+expected = """
+SELECT sum(foo), CASE WHEN a = 1 THEN 'x' ELSE 'y' END AS label
+FROM t"""
+preserve_structure = true
+
+[[case]]
+name = "mixed_supported_and_unsupported_statements_format_pragmatically"
+sql = "select a from foo; insert into foo values (1); select b from bar;"
+expected = """
+SELECT a
+FROM foo;
+
+insert into foo values (1);
+
+SELECT b
+FROM bar;"""

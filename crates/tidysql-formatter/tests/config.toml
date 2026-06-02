@@ -1,0 +1,37 @@
+[[case]]
+name = "select_list_breaks_when_line_width_is_narrow"
+sql = "select a,b,c from foo"
+config = { line_width = 12 }
+expected = """
+SELECT
+    a,
+    b,
+    c
+FROM foo"""
+
+[[case]]
+name = "leading_commas_apply_when_select_list_breaks"
+sql = "select a,b,c from foo"
+config = { comma_style = "leading", line_width = 12 }
+expected = """
+SELECT
+    a
+    , b
+    , c
+FROM foo"""
+
+[[case]]
+name = "keyword_case_can_be_lower"
+sql = "SELECT a FROM foo"
+config = { keyword_case = "lower" }
+expected = """
+select a
+from foo"""
+
+[[case]]
+name = "keyword_case_can_be_preserved"
+sql = "select a from foo"
+config = { keyword_case = "preserve" }
+expected = """
+select a
+from foo"""

@@ -1518,8 +1518,11 @@ dependencies = [
 name = "tidysql-formatter"
 version = "0.1.0"
 dependencies = [
+ "datatest-stable",
+ "serde",
  "tidysql-config",
  "tidysql-syntax",
+ "toml",
 ]
 
 [[package]]

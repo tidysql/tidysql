@@ -7,3 +7,12 @@ license.workspace = true
 [dependencies]
 tidysql-config = { workspace = true }
 tidysql-syntax = { workspace = true }
+
+[dev-dependencies]
+datatest-stable = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[[test]]
+name = "format_suites"
+harness = false

@@ -1,0 +1,65 @@
+[[case]]
+name = "function_arguments_break_when_line_width_is_narrow"
+sql = "select coalesce(long_name, fallback_value, final_value) from foo"
+config = { line_width = 10 }
+expected = """
+SELECT
+    coalesce(
+        long_name,
+        fallback_value,
+        final_value
+    )
+FROM foo"""
+
+[[case]]
+name = "boolean_expression_breaks_when_line_width_is_narrow"
+sql = "select a from foo where a=1 and b=2 and c=3"
+config = { line_width = 10 }
+expected = """
+SELECT a
+FROM foo
+WHERE
+    a = 1
+    AND b = 2
+    AND c = 3"""
+
+[[case]]
+name = "case_expression_breaks_when_line_width_is_narrow"
+sql = "select case when a=1 then 'x' when b=2 then 'y' else 'z' end as label from foo"
+config = { line_width = 10 }
+expected = """
+SELECT
+    CASE
+        WHEN a = 1 THEN 'x'
+        WHEN b = 2 THEN 'y'
+        ELSE 'z'
+    END AS label
+FROM foo"""
+
+[[case]]
+name = "joins_break_when_line_width_is_narrow"
+sql = "select a from foo join bar on foo.id=bar.foo_id join baz on bar.id=baz.bar_id"
+config = { line_width = 32 }
+expected = """
+SELECT a
+FROM
+    foo
+    JOIN bar ON foo.id = bar.foo_id
+    JOIN baz ON bar.id = baz.bar_id"""
+
+[[case]]
+name = "multiple_ctes_keep_commas_in_broken_layout"
+sql = "with a as (select x from foo), b as (select y from bar) select x,y from a"
+config = { line_width = 45 }
+expected = """
+WITH
+    a AS (
+        SELECT x
+        FROM foo
+    ),
+    b AS (
+        SELECT y
+        FROM bar
+    )
+SELECT x, y
+FROM a"""
