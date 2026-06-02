@@ -41,14 +41,14 @@ impl BatchAggregator {
                     Ok(())
                 }
             }
-            BatchCommandKind::FormatWrite => {
+            BatchCommandKind::FormatWrite { .. } => {
                 if self.summary.had_processing_error {
                     Err("format failed: at least one file could not be processed".to_string())
                 } else {
                     Ok(())
                 }
             }
-            BatchCommandKind::FormatCheck => {
+            BatchCommandKind::FormatCheck { .. } => {
                 if self.summary.had_processing_error {
                     Err("format check failed: at least one file could not be processed".to_string())
                 } else if self.summary.had_format_differences {
@@ -92,8 +92,8 @@ fn handle_result(result: &FileResult, command: BatchCommandKind, summary: &mut B
             summary.had_processing_error = true;
             match command {
                 BatchCommandKind::Check { .. }
-                | BatchCommandKind::FormatWrite
-                | BatchCommandKind::FormatCheck => {
+                | BatchCommandKind::FormatWrite { .. }
+                | BatchCommandKind::FormatCheck { .. } => {
                     eprintln!("{}: {message}", result.display_path);
                 }
             }

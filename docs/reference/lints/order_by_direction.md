@@ -4,7 +4,11 @@
 
 **Summary:** Requires consistent ASC/DESC modifiers across ORDER BY items.
 
-**Default level:** `warn`
+**Category:** `convention`
+
+**Editor default:** `hidden`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

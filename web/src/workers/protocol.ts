@@ -12,9 +12,24 @@ export type MonacoDiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint'
 
 export type MonacoDiagnosticSource = 'sql' | 'config'
 
+export type MonacoDiagnosticCategory =
+  | 'correctness'
+  | 'suspicious'
+  | 'determinism'
+  | 'maintainability'
+  | 'policy'
+  | 'convention'
+  | 'formatting_compat'
+
+export type MonacoDiagnosticEditorDefault = 'live' | 'save' | 'hidden'
+
 export type MonacoDiagnostic = {
+  code: string
   message: string
   severity: MonacoDiagnosticSeverity
+  category: MonacoDiagnosticCategory
+  editorDefault: MonacoDiagnosticEditorDefault
+  fixable: boolean
   start: MonacoPosition
   end: MonacoPosition
   source?: MonacoDiagnosticSource

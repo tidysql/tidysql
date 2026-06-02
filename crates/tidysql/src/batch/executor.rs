@@ -88,8 +88,10 @@ fn process_job(
 
     let outcome = match command {
         BatchCommandKind::Check { fix } => process_check_file(&job.path, input, &config, fix),
-        BatchCommandKind::FormatWrite => process_format_write(&job.path, input, &config),
-        BatchCommandKind::FormatCheck => process_format_check(input, &config),
+        BatchCommandKind::FormatWrite { strict } => {
+            process_format_write(&job.path, input, &config, strict)
+        }
+        BatchCommandKind::FormatCheck { strict } => process_format_check(input, &config, strict),
     };
     FileResult { seq: job.seq, display_path: job.display_path, outcome }
 }
@@ -124,8 +126,9 @@ fn process_format_write(
     path: &Path,
     input: String,
     config: &tidysql_config::Config,
+    strict: bool,
 ) -> FileOutcome {
-    let formatted = match tidysql::format_with_config(&input, config) {
+    let formatted = match format_source(&input, config, strict) {
         Ok(formatted) => formatted,
         Err(error) => return FileOutcome::Error(error.to_string()),
     };
@@ -139,9 +142,25 @@ fn process_format_write(
     FileOutcome::Success
 }
 
-fn process_format_check(input: String, config: &tidysql_config::Config) -> FileOutcome {
-    match tidysql::format_with_config(&input, config) {
+fn process_format_check(
+    input: String,
+    config: &tidysql_config::Config,
+    strict: bool,
+) -> FileOutcome {
+    match format_source(&input, config, strict) {
         Ok(formatted) => FileOutcome::FormatCheck { needs_rewrite: formatted != input },
         Err(error) => FileOutcome::Error(error.to_string()),
+    }
+}
+
+fn format_source(
+    input: &str,
+    config: &tidysql_config::Config,
+    strict: bool,
+) -> Result<String, tidysql_formatter::FormatError> {
+    if strict {
+        tidysql::format_with_config_strict(input, config)
+    } else {
+        tidysql::format_with_config(input, config)
     }
 }

@@ -34,15 +34,27 @@ struct GlobalConfigArgs {
 }
 
 #[derive(Args, Clone)]
-struct ConfigOverrideArgs {
+struct CoreOverrideArgs {
     #[arg(long, value_name = "DIALECT")]
     dialect: Option<tidysql_config::Dialect>,
+}
+
+#[derive(Args, Clone)]
+struct LintOverrideArgs {
     #[arg(short = 'A', long, value_name = "LINT")]
     allow: Vec<tidysql_config::LintName>,
     #[arg(short = 'W', long, value_name = "LINT")]
     warn: Vec<tidysql_config::LintName>,
     #[arg(short = 'D', long, value_name = "LINT")]
     deny: Vec<tidysql_config::LintName>,
+}
+
+#[derive(Args, Clone)]
+struct CheckOverrideArgs {
+    #[command(flatten)]
+    core: CoreOverrideArgs,
+    #[command(flatten)]
+    lints: LintOverrideArgs,
 }
 
 #[derive(Subcommand)]
@@ -62,12 +74,14 @@ struct FormatCommand {
     write: bool,
     #[arg(long)]
     check: bool,
+    #[arg(long)]
+    strict: bool,
     #[arg(long, value_name = "N")]
     jobs: Option<usize>,
     #[arg(long, value_name = "PATH")]
     stdin_filename: Option<PathBuf>,
     #[command(flatten)]
-    config_overrides: ConfigOverrideArgs,
+    config_overrides: CoreOverrideArgs,
 }
 
 #[derive(Args, Clone)]
@@ -83,13 +97,13 @@ struct CheckCommand {
     #[arg(long, value_name = "PATH")]
     stdin_filename: Option<PathBuf>,
     #[command(flatten)]
-    config_overrides: ConfigOverrideArgs,
+    config_overrides: CheckOverrideArgs,
 }
 
 #[derive(Args)]
 struct LspCommand {
     #[command(flatten)]
-    config_overrides: ConfigOverrideArgs,
+    config_overrides: CheckOverrideArgs,
 }
 
 struct LoadedSource {
@@ -151,14 +165,28 @@ impl ConfigOverrides {
     }
 }
 
-impl From<ConfigOverrideArgs> for ConfigOverrides {
-    fn from(args: ConfigOverrideArgs) -> Self {
-        let mut lint_levels = Vec::new();
-        Self::extend_lint_levels(&mut lint_levels, args.allow, tidysql_config::Severity::Allow);
-        Self::extend_lint_levels(&mut lint_levels, args.warn, tidysql_config::Severity::Warn);
-        Self::extend_lint_levels(&mut lint_levels, args.deny, tidysql_config::Severity::Error);
+impl From<CoreOverrideArgs> for ConfigOverrides {
+    fn from(args: CoreOverrideArgs) -> Self {
+        Self { dialect: args.dialect, lint_levels: Vec::new() }
+    }
+}
 
-        Self { dialect: args.dialect, lint_levels }
+impl From<CheckOverrideArgs> for ConfigOverrides {
+    fn from(args: CheckOverrideArgs) -> Self {
+        let mut lint_levels = Vec::new();
+        Self::extend_lint_levels(
+            &mut lint_levels,
+            args.lints.allow,
+            tidysql_config::Severity::Allow,
+        );
+        Self::extend_lint_levels(&mut lint_levels, args.lints.warn, tidysql_config::Severity::Warn);
+        Self::extend_lint_levels(
+            &mut lint_levels,
+            args.lints.deny,
+            tidysql_config::Severity::Error,
+        );
+
+        Self { dialect: args.core.dialect, lint_levels }
     }
 }
 
@@ -275,10 +303,10 @@ impl IgnoreMatcherCache {
     }
 }
 
-fn config_arguments(
-    global_options: GlobalConfigArgs,
-    config_overrides: ConfigOverrideArgs,
-) -> ConfigArguments {
+fn config_arguments<T>(global_options: GlobalConfigArgs, config_overrides: T) -> ConfigArguments
+where
+    T: Into<ConfigOverrides>,
+{
     ConfigArguments::from_cli_arguments(global_options, config_overrides.into())
 }
 
@@ -298,12 +326,6 @@ fn main() {
 }
 
 fn format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
-    let _ = (args, global_options);
-    Err("formatting is not yet implemented".to_string())
-}
-
-#[allow(dead_code)]
-fn hidden_format(args: FormatCommand, global_options: GlobalConfigArgs) -> Result<(), String> {
     if args.write && args.check {
         return Err("format mode conflict: choose either --write or --check".to_string());
     }
@@ -322,9 +344,9 @@ fn hidden_format(args: FormatCommand, global_options: GlobalConfigArgs) -> Resul
             }
 
             let mode = if args.write {
-                BatchCommandKind::FormatWrite
+                BatchCommandKind::FormatWrite { strict: args.strict }
             } else {
-                BatchCommandKind::FormatCheck
+                BatchCommandKind::FormatCheck { strict: args.strict }
             };
             run_batch(plan, mode, args.jobs, &config_arguments)
         }
@@ -355,7 +377,7 @@ fn format_stdin(args: FormatCommand, config_arguments: &ConfigArguments) -> Resu
 
     let LoadedSource { input, config, .. } =
         load_source(None, args.stdin_filename.as_deref(), config_arguments)?;
-    let formatted = tidysql::format_with_config(&input, &config).map_err(|err| err.to_string())?;
+    let formatted = format_source(&input, &config, args.strict)?;
 
     if args.check {
         if formatted != input {
@@ -374,7 +396,7 @@ fn format_single_file(
 ) -> Result<(), String> {
     let LoadedSource { input, config, display_path, source_path } =
         load_source(Some(&path), None, config_arguments)?;
-    let formatted = tidysql::format_with_config(&input, &config).map_err(|err| err.to_string())?;
+    let formatted = format_source(&input, &config, args.strict)?;
 
     if args.check {
         if formatted != input {
@@ -393,6 +415,20 @@ fn format_single_file(
     }
 
     write_output(&formatted).map_err(|err| err.to_string())
+}
+
+fn format_source(
+    source: &str,
+    config: &tidysql_config::Config,
+    strict: bool,
+) -> Result<String, String> {
+    let result = if strict {
+        tidysql::format_with_config_strict(source, config)
+    } else {
+        tidysql::format_with_config(source, config)
+    };
+
+    result.map_err(|err| err.to_string())
 }
 
 fn check_stdin(args: CheckCommand, config_arguments: &ConfigArguments) -> Result<(), String> {
@@ -504,34 +540,185 @@ fn load_ignore_matcher_with_reporter(
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use tempfile::tempdir;
 
     use super::{
-        ConfigOverrideArgs, FormatCommand, GlobalConfigArgs, format,
+        CheckOverrideArgs, Cli, Command, CoreOverrideArgs, FormatCommand, GlobalConfigArgs,
+        LintOverrideArgs, config_arguments, format, format_single_file,
         load_ignore_matcher_with_reporter,
     };
 
     #[test]
-    fn format_command_is_disabled() {
+    fn format_rejects_lint_override_flags() {
+        let error =
+            match Cli::try_parse_from(["tidysql", "format", "-W", "explicit_union", "query.sql"]) {
+                Ok(_) => panic!("format should reject lint override flags"),
+                Err(error) => error,
+            };
+
+        assert!(error.to_string().contains("unexpected argument '-W'"));
+    }
+
+    #[test]
+    fn check_accepts_lint_override_flags() {
+        let cli =
+            Cli::try_parse_from(["tidysql", "check", "-W", "explicit_union", "query.sql"]).unwrap();
+
+        assert!(matches!(cli.command, Command::Check(_)));
+    }
+
+    #[test]
+    fn format_batch_stdout_requires_write_or_check() {
+        let dir = tempdir().unwrap();
+        let one = dir.path().join("one.sql");
+        let two = dir.path().join("two.sql");
+        std::fs::write(&one, "select a from foo").unwrap();
+        std::fs::write(&two, "select b from bar").unwrap();
+
         let result = format(
             FormatCommand {
-                inputs: Vec::new(),
+                inputs: vec![one, two],
                 glob: Vec::new(),
                 write: false,
                 check: false,
+                strict: false,
                 jobs: None,
                 stdin_filename: None,
-                config_overrides: ConfigOverrideArgs {
-                    dialect: None,
-                    allow: Vec::new(),
-                    warn: Vec::new(),
-                    deny: Vec::new(),
-                },
+                config_overrides: empty_core_overrides(),
             },
             GlobalConfigArgs { config: None, isolated: false },
         );
 
-        assert_eq!(result.unwrap_err(), "formatting is not yet implemented");
+        assert_eq!(
+            result.unwrap_err(),
+            "batch format requires either --write or --check to avoid concatenating files to stdout"
+        );
+    }
+
+    #[test]
+    fn format_single_file_write_rewrites_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        std::fs::write(&path, "select a,b from foo").unwrap();
+        let config_arguments = config_arguments(
+            GlobalConfigArgs { config: None, isolated: true },
+            empty_config_overrides(),
+        );
+
+        format_single_file(
+            path.clone(),
+            FormatCommand {
+                inputs: Vec::new(),
+                glob: Vec::new(),
+                write: true,
+                check: false,
+                strict: false,
+                jobs: None,
+                stdin_filename: None,
+                config_overrides: empty_core_overrides(),
+            },
+            &config_arguments,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "SELECT a, b\nFROM foo");
+    }
+
+    #[test]
+    fn format_single_file_check_reports_needed_rewrite() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        std::fs::write(&path, "select a from foo").unwrap();
+        let config_arguments = config_arguments(
+            GlobalConfigArgs { config: None, isolated: true },
+            empty_config_overrides(),
+        );
+
+        let result = format_single_file(
+            path,
+            FormatCommand {
+                inputs: Vec::new(),
+                glob: Vec::new(),
+                write: false,
+                check: true,
+                strict: false,
+                jobs: None,
+                stdin_filename: None,
+                config_overrides: empty_core_overrides(),
+            },
+            &config_arguments,
+        );
+
+        assert_eq!(result.unwrap_err(), "format check failed: files require formatting");
+    }
+
+    #[test]
+    fn format_single_file_preserves_unsupported_statement_by_default() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        std::fs::write(&path, "insert into foo values (1)").unwrap();
+        let config_arguments = config_arguments(
+            GlobalConfigArgs { config: None, isolated: true },
+            empty_config_overrides(),
+        );
+
+        format_single_file(
+            path.clone(),
+            FormatCommand {
+                inputs: Vec::new(),
+                glob: Vec::new(),
+                write: true,
+                check: false,
+                strict: false,
+                jobs: None,
+                stdin_filename: None,
+                config_overrides: empty_core_overrides(),
+            },
+            &config_arguments,
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "insert into foo values (1)");
+    }
+
+    #[test]
+    fn format_single_file_strict_rejects_unsupported_statement() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        std::fs::write(&path, "insert into foo values (1)").unwrap();
+        let config_arguments = config_arguments(
+            GlobalConfigArgs { config: None, isolated: true },
+            empty_config_overrides(),
+        );
+
+        let result = format_single_file(
+            path,
+            FormatCommand {
+                inputs: Vec::new(),
+                glob: Vec::new(),
+                write: true,
+                check: false,
+                strict: true,
+                jobs: None,
+                stdin_filename: None,
+                config_overrides: empty_core_overrides(),
+            },
+            &config_arguments,
+        );
+
+        assert!(result.unwrap_err().contains("formatting does not yet support InsertStatement"));
+    }
+
+    fn empty_core_overrides() -> CoreOverrideArgs {
+        CoreOverrideArgs { dialect: None }
+    }
+
+    fn empty_config_overrides() -> CheckOverrideArgs {
+        CheckOverrideArgs {
+            core: empty_core_overrides(),
+            lints: LintOverrideArgs { allow: Vec::new(), warn: Vec::new(), deny: Vec::new() },
+        }
     }
 
     #[test]

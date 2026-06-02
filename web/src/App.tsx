@@ -15,6 +15,12 @@ const defaultConfigToml = `[core]
 dialect = "ansi"
 `
 
+const diagnosticCategoryLabel = (category: MonacoDiagnostic['category']) =>
+  category
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+
 let monacoConfigured = false
 
 const configureMonaco = (monaco: typeof import('monaco-editor')) => {
@@ -140,10 +146,11 @@ function App() {
     () => dialectOptions.some((option) => option.id === dialect),
     [dialectOptions, dialect]
   )
-  const sqlDiagnosticsCount = useMemo(
+  const fixableSqlDiagnosticsCount = useMemo(
     () =>
-      diagnostics.filter((diagnostic) => (diagnostic.source ?? 'sql') === 'sql')
-        .length,
+      diagnostics.filter(
+        (diagnostic) => (diagnostic.source ?? 'sql') === 'sql' && diagnostic.fixable
+      ).length,
     [diagnostics]
   )
   const loadingLabel = useMemo(() => {
@@ -355,12 +362,12 @@ function App() {
   }, [runSqlTransform, wasmReady])
 
   const handleFixAll = useCallback(() => {
-    if (!wasmReady) {
+    if (!wasmReady || fixableSqlDiagnosticsCount === 0) {
       return
     }
 
     void runSqlTransform('fix')
-  }, [runSqlTransform, wasmReady])
+  }, [fixableSqlDiagnosticsCount, runSqlTransform, wasmReady])
 
   const updateConfigToml = (nextConfig: string) => {
     setConfigToml(nextConfig)
@@ -542,9 +549,9 @@ function App() {
             className="control-button control-button-accent"
             type="button"
             onClick={handleFixAll}
-            disabled={!wasmReady || sqlDiagnosticsCount === 0}
+            disabled={!wasmReady || fixableSqlDiagnosticsCount === 0}
           >
-            Fix All ({sqlDiagnosticsCount})
+            Fix Issues ({fixableSqlDiagnosticsCount})
           </button>
         </div>
       </header>
@@ -635,6 +642,9 @@ function App() {
             <h2 className="issues-title">
               Issues <span className="issues-count">{diagnostics.length}</span>
             </h2>
+            <div className="issues-subtitle">
+              Fixable <span>{fixableSqlDiagnosticsCount}</span>
+            </div>
           </div>
           <div className="issue-list custom-scrollbar">
             {workspaceError ? (
@@ -681,6 +691,15 @@ function App() {
                       <span className="issue-line">
                         Line {diagnostic.start.line}:{diagnostic.start.column}
                       </span>
+                      <span className="issue-category">
+                        {diagnosticCategoryLabel(diagnostic.category)}
+                      </span>
+                      {diagnostic.code ? (
+                        <span className="issue-code">{diagnostic.code}</span>
+                      ) : null}
+                      {diagnostic.fixable ? (
+                        <span className="issue-fixable">fixable</span>
+                      ) : null}
                     </div>
                     <p className="issue-title">{diagnostic.message}</p>
                   </div>

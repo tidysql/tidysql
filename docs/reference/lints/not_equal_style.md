@@ -4,7 +4,11 @@
 
 **Summary:** Enforces a consistent not-equal operator style.
 
-**Default level:** `warn`
+**Category:** `convention`
+
+**Editor default:** `hidden`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

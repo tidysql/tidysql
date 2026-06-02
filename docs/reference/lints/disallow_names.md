@@ -4,7 +4,11 @@
 
 **Summary:** Disallows specific identifier names.
 
-**Default level:** `warn`
+**Category:** `policy`
+
+**Editor default:** `hidden`
+
+**Default level:** `allow`
 
 **Fixable:** no
 

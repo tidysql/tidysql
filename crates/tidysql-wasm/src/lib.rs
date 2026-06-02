@@ -9,8 +9,12 @@ struct MonacoPosition {
 
 #[derive(Serialize)]
 struct MonacoDiagnostic {
+    code: String,
     message: String,
     severity: &'static str,
+    category: &'static str,
+    editor_default: &'static str,
+    fixable: bool,
     start: MonacoPosition,
     end: MonacoPosition,
     source: &'static str,
@@ -36,8 +40,11 @@ impl Workspace {
     pub fn check_with_config(&self, source: &str, config_toml: &str) -> Result<JsValue, JsValue> {
         let config = parse_config(config_toml)?;
 
-        let diagnostics =
-            to_monaco_diagnostics(source, tidysql::check_with_config(source, &config), "sql");
+        let diagnostics = to_monaco_diagnostics(
+            source,
+            tidysql::check_for_editor_with_config(source, &config),
+            "sql",
+        );
 
         to_js_value(&diagnostics)
     }
@@ -73,16 +80,26 @@ fn parse_config(config_toml: &str) -> Result<tidysql_config::Config, JsValue> {
 }
 
 fn config_error_value(config_toml: &str, error: &tidysql_config::ConfigError) -> JsValue {
+    let diagnostics = config_error_diagnostics(config_toml, error);
+    to_js_value(&diagnostics).unwrap_or_else(|error| error)
+}
+
+fn config_error_diagnostics(
+    config_toml: &str,
+    error: &tidysql_config::ConfigError,
+) -> [MonacoDiagnostic; 1] {
     let range = config_error_range(error);
-    let diagnostics = [MonacoDiagnostic {
+    [MonacoDiagnostic {
+        code: "config_error".to_string(),
         message: config_error_message(error),
         severity: map_severity(tidysql::Severity::Error),
+        category: "correctness",
+        editor_default: "live",
+        fixable: false,
         start: utf16_position(config_toml, range.start),
         end: utf16_position(config_toml, range.end),
         source: "config",
-    }];
-
-    to_js_value(&diagnostics).unwrap_or_else(|error| error)
+    }]
 }
 
 fn to_js_value<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
@@ -107,13 +124,29 @@ fn to_monaco_diagnostics(
     diagnostics
         .into_iter()
         .map(|diagnostic| MonacoDiagnostic {
+            code: diagnostic.code.to_string(),
             message: diagnostic.message,
             severity: map_severity(diagnostic.severity),
+            category: diagnostic_category(diagnostic.code),
+            editor_default: diagnostic_editor_default(diagnostic.code),
+            fixable: diagnostic.fix.is_some(),
             start: utf16_position(source, diagnostic.range.start),
             end: utf16_position(source, diagnostic.range.end),
             source: diagnostic_source,
         })
         .collect()
+}
+
+fn diagnostic_category(code: &str) -> &'static str {
+    tidysql_lints::metadata::lint_metadata(code)
+        .map(|metadata| metadata.category.as_str())
+        .unwrap_or("correctness")
+}
+
+fn diagnostic_editor_default(code: &str) -> &'static str {
+    tidysql_lints::metadata::lint_metadata(code)
+        .map(|metadata| metadata.editor_default.as_str())
+        .unwrap_or("live")
 }
 
 fn utf16_position(source: &str, byte_index: usize) -> MonacoPosition {
@@ -209,5 +242,37 @@ respect_gitignore = true
 
         let message = config_error_message(&error);
         assert!(message.contains("unknown field `files`"));
+    }
+
+    #[test]
+    fn sql_diagnostics_include_code_category_and_fixability() {
+        let config = tidysql_config::Config::from_toml_str("").unwrap();
+        let diagnostics =
+            tidysql::check_for_editor_with_config("SELECT * FROM foo WHERE x = NULL", &config);
+        let monaco = to_monaco_diagnostics("SELECT * FROM foo WHERE x = NULL", diagnostics, "sql");
+        let diagnostic =
+            monaco.iter().find(|diagnostic| diagnostic.code == "null_comparison").unwrap();
+
+        assert_eq!(diagnostic.category, "correctness");
+        assert_eq!(diagnostic.editor_default, "live");
+        assert!(diagnostic.fixable);
+        assert_eq!(diagnostic.source, "sql");
+    }
+
+    #[test]
+    fn config_error_diagnostics_include_non_fixable_metadata() {
+        let error = tidysql_config::Config::from_toml_str(
+            r#"
+[files]
+respect_gitignore = true
+"#,
+        )
+        .unwrap_err();
+        let diagnostics = config_error_diagnostics("[files]\nrespect_gitignore = true\n", &error);
+
+        assert_eq!(diagnostics[0].code, "config_error");
+        assert_eq!(diagnostics[0].category, "correctness");
+        assert_eq!(diagnostics[0].editor_default, "live");
+        assert!(!diagnostics[0].fixable);
     }
 }

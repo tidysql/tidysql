@@ -4,7 +4,11 @@
 
 **Summary:** Flags CTEs that are defined but never referenced.
 
-**Default level:** `warn`
+**Category:** `maintainability`
+
+**Editor default:** `save`
+
+**Default level:** `hint`
 
 **Fixable:** no
 

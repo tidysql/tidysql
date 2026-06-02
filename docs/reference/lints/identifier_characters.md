@@ -4,7 +4,11 @@
 
 **Summary:** Flags identifiers with special characters.
 
-**Default level:** `warn`
+**Category:** `policy`
+
+**Editor default:** `hidden`
+
+**Default level:** `hint`
 
 **Fixable:** no
 

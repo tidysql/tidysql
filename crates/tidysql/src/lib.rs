@@ -1,6 +1,6 @@
 use std::fmt;
 
-use tidysql_config::Dialect;
+use tidysql_config::{DiagnosticsProfile, Dialect};
 pub use tidysql_lints::{Diagnostic, FixPhase, Severity};
 use tidysql_syntax::{DialectKind, EditError, Fix, ParseError, TextEdit};
 
@@ -44,6 +44,36 @@ pub fn check_with_config(source: &str, config: &tidysql_config::Config) -> Vec<D
     check_with_dialect(source, dialect, config)
 }
 
+pub fn check_for_editor_with_config(
+    source: &str,
+    config: &tidysql_config::Config,
+) -> Vec<Diagnostic> {
+    check_with_config(source, config)
+        .into_iter()
+        .filter(|diagnostic| editor_diagnostic_visible(diagnostic, config.diagnostics.profile))
+        .collect()
+}
+
+fn editor_diagnostic_visible(diagnostic: &Diagnostic, profile: DiagnosticsProfile) -> bool {
+    if matches!(diagnostic.severity, Severity::Error) {
+        return true;
+    }
+
+    let Some(metadata) = tidysql_lints::metadata::lint_metadata(diagnostic.code) else {
+        return true;
+    };
+
+    match profile {
+        DiagnosticsProfile::Quiet => {
+            metadata.editor_default == tidysql_lints::metadata::EditorDefault::Live
+        }
+        DiagnosticsProfile::Recommended => {
+            !matches!(metadata.editor_default, tidysql_lints::metadata::EditorDefault::Hidden)
+        }
+        DiagnosticsProfile::Strict => true,
+    }
+}
+
 fn check_with_dialect(
     source: &str,
     dialect: DialectKind,
@@ -60,7 +90,15 @@ pub fn format_with_config(
     config: &tidysql_config::Config,
 ) -> Result<String, tidysql_formatter::FormatError> {
     let dialect = config_dialect(config);
-    tidysql_formatter::format_with_dialect(source, dialect)
+    tidysql_formatter::format_with_config(source, dialect, &config.format)
+}
+
+pub fn format_with_config_strict(
+    source: &str,
+    config: &tidysql_config::Config,
+) -> Result<String, tidysql_formatter::FormatError> {
+    let dialect = config_dialect(config);
+    tidysql_formatter::format_with_config_strict(source, dialect, &config.format)
 }
 
 pub fn fix_with_config(source: &str, config: &tidysql_config::Config) -> Result<String, FixError> {
@@ -200,5 +238,116 @@ not_equal_style = { level = "warn", preferred = "angle" }
 
         let fixed = fix_with_config("SELECT * FROM foo WHERE a != NULL", &config).unwrap();
         assert_eq!(fixed, "SELECT * FROM foo WHERE a IS NOT NULL");
+    }
+
+    #[test]
+    fn editor_diagnostics_keep_correctness_and_hide_convention_defaults() {
+        let config = tidysql_config::Config::from_toml_str("").unwrap();
+        let diagnostics =
+            check_for_editor_with_config("SELECT COUNT(1) FROM foo WHERE x = NULL", &config);
+
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "null_comparison"));
+        assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "count_rows"));
+    }
+
+    #[test]
+    fn editor_diagnostics_keep_escalated_quiet_categories() {
+        let config = tidysql_config::Config::from_toml_str(
+            r#"
+[lints]
+count_rows = { level = "error" }
+"#,
+        )
+        .unwrap();
+        let diagnostics = check_for_editor_with_config("SELECT COUNT(1) FROM foo", &config);
+
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "count_rows"));
+    }
+
+    #[test]
+    fn editor_diagnostics_recommended_profile_includes_save_defaults() {
+        let config = tidysql_config::Config::from_toml_str(
+            r#"
+[diagnostics]
+profile = "recommended"
+"#,
+        )
+        .unwrap();
+
+        let diagnostics = check_for_editor_with_config(
+            "WITH live AS (SELECT 1), dead AS (SELECT 2) SELECT * FROM live",
+            &config,
+        );
+
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "unused_cte"));
+    }
+
+    #[test]
+    fn editor_diagnostics_strict_profile_includes_hidden_defaults() {
+        let config = tidysql_config::Config::from_toml_str(
+            r#"
+[diagnostics]
+profile = "strict"
+"#,
+        )
+        .unwrap();
+
+        let diagnostics = check_for_editor_with_config("SELECT COUNT(1) FROM foo", &config);
+
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "count_rows"));
+    }
+
+    #[test]
+    fn editor_diagnostics_show_only_high_signal_defaults() {
+        let config = tidysql_config::Config::from_toml_str("").unwrap();
+
+        let visible_cases = [
+            ("SELECT * FROM foo WHERE x = NULL", "null_comparison"),
+            ("SELECT * FROM foo WHERE foo.id = foo.id", "constant_expression"),
+            ("SELECT a AS value, b AS value FROM foo", "unique_column_alias"),
+            ("SELECT 1;;", "consecutive_semicolons"),
+            ("SELECT * FROM foo LIMIT 10", "require_order_by"),
+        ];
+        for (sql, expected_code) in visible_cases {
+            let diagnostics = check_for_editor_with_config(sql, &config);
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == expected_code),
+                "expected {expected_code} for {sql}",
+            );
+        }
+
+        let hidden_cases = [
+            ("SeLeCt 1 from foo", "keyword_case"),
+            ("SELECT COUNT(1) FROM foo", "count_rows"),
+            ("SELECT * FROM foo WHERE y != 1", "not_equal_style"),
+            ("WITH live AS (SELECT 1), dead AS (SELECT 2) SELECT * FROM live", "unused_cte"),
+            ("SELECT id FROM foo AS f", "unused_table_alias"),
+            ("SELECT CASE WHEN flag THEN 1 ELSE NULL END FROM foo", "else_null"),
+        ];
+        for (sql, hidden_code) in hidden_cases {
+            let diagnostics = check_for_editor_with_config(sql, &config);
+            assert!(
+                !diagnostics.iter().any(|diagnostic| diagnostic.code == hidden_code),
+                "did not expect {hidden_code} for {sql}",
+            );
+        }
+    }
+
+    #[test]
+    fn format_does_not_apply_lint_fixes() {
+        let config = tidysql_config::Config::from_toml_str("").unwrap();
+
+        let formatted = format_with_config("select * from foo where x = null", &config).unwrap();
+
+        assert_eq!(formatted, "SELECT *\nFROM foo\nWHERE x = null");
+    }
+
+    #[test]
+    fn fix_does_not_format_visual_style() {
+        let config = tidysql_config::Config::from_toml_str("").unwrap();
+
+        let fixed = fix_with_config("select * from foo where x = null", &config).unwrap();
+
+        assert_eq!(fixed, "select * from foo where x IS NULL");
     }
 }

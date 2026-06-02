@@ -1,5 +1,47 @@
 use tidysql_config::{Config, Severity};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintCategory {
+    Correctness,
+    Suspicious,
+    Determinism,
+    Maintainability,
+    Policy,
+    Convention,
+    FormattingCompat,
+}
+
+impl LintCategory {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            LintCategory::Correctness => "correctness",
+            LintCategory::Suspicious => "suspicious",
+            LintCategory::Determinism => "determinism",
+            LintCategory::Maintainability => "maintainability",
+            LintCategory::Policy => "policy",
+            LintCategory::Convention => "convention",
+            LintCategory::FormattingCompat => "formatting_compat",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorDefault {
+    Live,
+    Save,
+    Hidden,
+}
+
+impl EditorDefault {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            EditorDefault::Live => "live",
+            EditorDefault::Save => "save",
+            EditorDefault::Hidden => "hidden",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LintOption {
     pub name: &'static str,
@@ -11,6 +53,8 @@ pub struct LintOption {
 #[derive(Debug, Clone)]
 pub struct LintMetadata {
     pub code: &'static str,
+    pub category: LintCategory,
+    pub editor_default: EditorDefault,
     pub summary: &'static str,
     pub rationale: &'static str,
     pub fixable: bool,
@@ -26,26 +70,12 @@ pub struct LintMetadata {
 const DIALECTS_EXPLICIT_UNION: &[&str] =
     &["ansi", "bigquery", "clickhouse", "databricks", "mysql", "redshift", "snowflake", "trino"];
 
-const KEYWORD_CASE_OPTIONS: &[LintOption] = &[
-    LintOption {
-        name: "policy",
-        type_name: "string",
-        default_value: "consistent",
-        description: "One of: consistent, upper, lower, capitalise, pascal, snake, camel",
-    },
-    LintOption {
-        name: "ignore_words",
-        type_name: "array<string>",
-        default_value: "[]",
-        description: "Keywords to ignore (case-insensitive)",
-    },
-    LintOption {
-        name: "ignore_words_regex",
-        type_name: "array<string>",
-        default_value: "[]",
-        description: "Regex patterns for keywords to ignore",
-    },
-];
+const KEYWORD_CASE_OPTIONS: &[LintOption] = &[LintOption {
+    name: "policy",
+    type_name: "string",
+    default_value: "consistent",
+    description: "Deprecated alias for format.keyword_case when set to upper or lower",
+}];
 
 const DISALLOW_NAMES_OPTIONS: &[LintOption] = &[
     LintOption {
@@ -174,23 +204,28 @@ fn level_unused_table_alias(config: &Config) -> Severity {
 pub const LINTS: &[LintMetadata] = &[
     LintMetadata {
         code: "keyword_case",
-        summary: "Enforces consistent capitalisation of SQL keywords.",
-        rationale: "Consistent keyword casing improves readability and reduces visual noise.",
-        fixable: true,
+        category: LintCategory::FormattingCompat,
+        editor_default: EditorDefault::Hidden,
+        summary: "Deprecated compatibility alias for formatter keyword casing.",
+        rationale: "Keyword casing is visual style and is handled by the formatter.",
+        fixable: false,
         config_example: r#"[lints]
-keyword_case = { level = "warn", policy = "upper" }"#,
+keyword_case = { policy = "upper" }"#,
         options: KEYWORD_CASE_OPTIONS,
         anti_pattern: "SeLeCt 1 from my_table",
         best_practices: &["SELECT 1 FROM my_table", "select 1 from my_table"],
         notes: &[
-            "Default level is allow; adding a keyword_case entry without level implies warn.",
-            "Policy snake and camel are treated as lowercase for SQL keywords.",
+            "tidysql check does not emit keyword_case diagnostics.",
+            "Use [format] keyword_case to configure casing for tidysql format and format --check.",
+            "Old policies upper and lower are translated to format.keyword_case when no explicit formatter keyword_case is set.",
         ],
         dialects: &[],
         level: level_keyword_case,
     },
     LintMetadata {
         code: "explicit_union",
+        category: LintCategory::Policy,
+        editor_default: EditorDefault::Save,
         summary: "Requires UNION to explicitly specify ALL or DISTINCT.",
         rationale: "Explicit set operators reduce ambiguity and make intent clear.",
         fixable: true,
@@ -205,6 +240,8 @@ explicit_union = { level = "warn" }"#,
     },
     LintMetadata {
         code: "disallow_names",
+        category: LintCategory::Policy,
+        editor_default: EditorDefault::Hidden,
         summary: "Disallows specific identifier names.",
         rationale: "Preventing weak or temporary names keeps schemas clean.",
         fixable: false,
@@ -222,6 +259,8 @@ disallow_names = { level = "warn", names = ["temp", "tmp"], regexes = ["^_"] }"#
     },
     LintMetadata {
         code: "consecutive_semicolons",
+        category: LintCategory::Suspicious,
+        editor_default: EditorDefault::Live,
         summary: "Flags duplicate semicolons that create empty statements.",
         rationale: "Duplicate terminators usually indicate accidental empty statements.",
         fixable: true,
@@ -236,6 +275,8 @@ consecutive_semicolons = { level = "warn" }"#,
     },
     LintMetadata {
         code: "constant_expression",
+        category: LintCategory::Correctness,
+        editor_default: EditorDefault::Live,
         summary: "Flags constant or self-comparing expressions.",
         rationale: "Expressions that are always true or compare a value to itself are often \
                     mistakes.",
@@ -251,6 +292,8 @@ constant_expression = { level = "warn" }"#,
     },
     LintMetadata {
         code: "count_rows",
+        category: LintCategory::Convention,
+        editor_default: EditorDefault::Hidden,
         summary: "Enforces a consistent COUNT() style for row counts.",
         rationale: "A single row-count convention keeps aggregation code uniform and easier to \
                     scan.",
@@ -266,6 +309,8 @@ count_rows = { level = "warn", preferred = "star" }"#,
     },
     LintMetadata {
         code: "distinct_parentheses",
+        category: LintCategory::Suspicious,
+        editor_default: EditorDefault::Live,
         summary: "Disallows DISTINCT used like a function call.",
         rationale: "DISTINCT applies to the whole select list, so parentheses around the first \
                     item are misleading.",
@@ -281,6 +326,8 @@ distinct_parentheses = { level = "warn" }"#,
     },
     LintMetadata {
         code: "else_null",
+        category: LintCategory::Maintainability,
+        editor_default: EditorDefault::Save,
         summary: "Removes redundant ELSE NULL branches from CASE expressions.",
         rationale: "CASE expressions already default to NULL when no ELSE branch is provided.",
         fixable: true,
@@ -295,6 +342,8 @@ else_null = { level = "warn" }"#,
     },
     LintMetadata {
         code: "identifier_characters",
+        category: LintCategory::Policy,
+        editor_default: EditorDefault::Hidden,
         summary: "Flags identifiers with special characters.",
         rationale: "Simple identifiers are easier to quote correctly and are more portable across \
                     dialects.",
@@ -310,6 +359,8 @@ identifier_characters = { level = "warn", allow_space = false, additional_allowe
     },
     LintMetadata {
         code: "keyword_identifier",
+        category: LintCategory::Convention,
+        editor_default: EditorDefault::Hidden,
         summary: "Avoids SQL keywords as identifiers.",
         rationale: "Keyword-shaped identifiers are valid in some contexts but remain confusing to \
                     readers.",
@@ -325,6 +376,8 @@ keyword_identifier = { level = "warn" }"#,
     },
     LintMetadata {
         code: "not_equal_style",
+        category: LintCategory::Convention,
+        editor_default: EditorDefault::Hidden,
         summary: "Enforces a consistent not-equal operator style.",
         rationale: "Using one not-equal form throughout a codebase reduces visual churn.",
         fixable: true,
@@ -339,6 +392,8 @@ not_equal_style = { level = "warn", preferred = "angle" }"#,
     },
     LintMetadata {
         code: "null_comparison",
+        category: LintCategory::Correctness,
+        editor_default: EditorDefault::Live,
         summary: "Requires IS or IS NOT for NULL checks.",
         rationale: "Using equality operators with NULL is misleading and often incorrect.",
         fixable: true,
@@ -356,6 +411,8 @@ null_comparison = { level = "warn" }"#,
     },
     LintMetadata {
         code: "order_by_direction",
+        category: LintCategory::Convention,
+        editor_default: EditorDefault::Hidden,
         summary: "Requires consistent ASC/DESC modifiers across ORDER BY items.",
         rationale: "When some ORDER BY items include a direction and others do not, intent is \
                     harder to read.",
@@ -371,6 +428,8 @@ order_by_direction = { level = "warn" }"#,
     },
     LintMetadata {
         code: "require_order_by",
+        category: LintCategory::Determinism,
+        editor_default: EditorDefault::Live,
         summary: "Flags LIMIT clauses, including LIMIT ... OFFSET, without ORDER BY.",
         rationale: "Top-N queries without an explicit ordering are typically non-deterministic.",
         fixable: false,
@@ -380,13 +439,15 @@ require_order_by = { level = "warn" }"#,
         anti_pattern: "SELECT * FROM foo LIMIT 10",
         best_practices: &["SELECT * FROM foo ORDER BY id LIMIT 10"],
         notes: &[
-            "Standalone OFFSET is not yet parsed, so this lint does not cover OFFSET-only queries."
+            "Standalone OFFSET is not yet parsed, so this lint does not cover OFFSET-only queries.",
         ],
         dialects: &[],
         level: level_require_order_by,
     },
     LintMetadata {
         code: "self_alias_column",
+        category: LintCategory::Maintainability,
+        editor_default: EditorDefault::Save,
         summary: "Removes column aliases that repeat the source name.",
         rationale: "Self-aliases add noise without changing query semantics.",
         fixable: true,
@@ -401,6 +462,8 @@ self_alias_column = { level = "warn" }"#,
     },
     LintMetadata {
         code: "simple_case",
+        category: LintCategory::Maintainability,
+        editor_default: EditorDefault::Save,
         summary: "Simplifies CASE expressions that only fill NULL values.",
         rationale: "NULL-filling CASE expressions are clearer as COALESCE calls.",
         fixable: true,
@@ -416,6 +479,8 @@ simple_case = { level = "warn" }"#,
     },
     LintMetadata {
         code: "unique_column_alias",
+        category: LintCategory::Correctness,
+        editor_default: EditorDefault::Live,
         summary: "Requires column aliases to be unique within a SELECT clause.",
         rationale: "Duplicate output names are confusing and often accidental.",
         fixable: false,
@@ -430,6 +495,8 @@ unique_column_alias = { level = "warn" }"#,
     },
     LintMetadata {
         code: "unique_table_alias",
+        category: LintCategory::Correctness,
+        editor_default: EditorDefault::Live,
         summary: "Requires table aliases to be unique within a statement.",
         rationale: "Reused table aliases make column qualification ambiguous to readers.",
         fixable: false,
@@ -444,6 +511,8 @@ unique_table_alias = { level = "warn" }"#,
     },
     LintMetadata {
         code: "unused_cte",
+        category: LintCategory::Maintainability,
+        editor_default: EditorDefault::Save,
         summary: "Flags CTEs that are defined but never referenced.",
         rationale: "Unused CTEs add maintenance cost and often reflect incomplete refactors.",
         fixable: false,
@@ -458,6 +527,8 @@ unused_cte = { level = "warn" }"#,
     },
     LintMetadata {
         code: "unused_table_alias",
+        category: LintCategory::Maintainability,
+        editor_default: EditorDefault::Save,
         summary: "Removes table aliases that are never referenced.",
         rationale: "Unused aliases make FROM and JOIN clauses noisier without adding clarity.",
         fixable: true,

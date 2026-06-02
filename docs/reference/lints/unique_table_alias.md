@@ -4,6 +4,10 @@
 
 **Summary:** Requires table aliases to be unique within a statement.
 
+**Category:** `correctness`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** no

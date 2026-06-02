@@ -4,6 +4,10 @@
 
 **Summary:** Flags duplicate semicolons that create empty statements.
 
+**Category:** `suspicious`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** yes

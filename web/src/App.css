@@ -251,6 +251,17 @@
   color: var(--text-main);
 }
 
+.issues-subtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.issues-subtitle span {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
 .issues-count {
   display: inline-flex;
   align-items: center;
@@ -341,6 +352,34 @@
 .issue-line {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.issue-category,
+.issue-code,
+.issue-fixable {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.issue-category {
+  text-transform: capitalize;
+}
+
+.issue-code {
+  color: #64748b;
+}
+
+.issue-fixable {
+  background: #ecfdf5;
+  color: #047857;
 }
 
 .issue-title {

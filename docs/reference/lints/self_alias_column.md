@@ -4,7 +4,11 @@
 
 **Summary:** Removes column aliases that repeat the source name.
 
-**Default level:** `warn`
+**Category:** `maintainability`
+
+**Editor default:** `save`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

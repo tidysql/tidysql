@@ -4,7 +4,11 @@
 
 **Summary:** Avoids SQL keywords as identifiers.
 
-**Default level:** `warn`
+**Category:** `convention`
+
+**Editor default:** `hidden`
+
+**Default level:** `hint`
 
 **Fixable:** no
 

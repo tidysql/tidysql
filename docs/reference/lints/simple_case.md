@@ -4,7 +4,11 @@
 
 **Summary:** Simplifies CASE expressions that only fill NULL values.
 
-**Default level:** `warn`
+**Category:** `maintainability`
+
+**Editor default:** `save`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

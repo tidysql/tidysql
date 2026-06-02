@@ -4,7 +4,11 @@
 
 **Summary:** Enforces a consistent COUNT() style for row counts.
 
-**Default level:** `warn`
+**Category:** `convention`
+
+**Editor default:** `hidden`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

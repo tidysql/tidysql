@@ -7,11 +7,13 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentFormattingParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    NumberOrString, Position, Range as LspRange, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, Diagnostic as LspDiagnostic,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, NumberOrString, OneOf,
+    Position, Range as LspRange, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Url, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -157,7 +159,16 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                document_formatting_provider: None,
+                document_formatting_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::from("source.fixAll.tidysql"),
+                        ]),
+                        ..Default::default()
+                    },
+                )),
                 ..Default::default()
             },
         })
@@ -214,9 +225,51 @@ impl LanguageServer for Backend {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        let _ = params;
-        Ok(None)
+        let uri = params.text_document.uri;
+        let Some((text, _)) = self.load_text(&uri).await else {
+            return Ok(None);
+        };
+
+        match compute_lsp_formatting(self.config.as_ref(), &uri, &text) {
+            Ok(edits) => Ok(edits),
+            Err(message) => {
+                self.client.log_message(MessageType::ERROR, message).await;
+                Ok(None)
+            }
+        }
     }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let Some((text, _)) = self.load_text(&uri).await else {
+            return Ok(None);
+        };
+
+        match compute_lsp_code_actions(self.config.as_ref(), &uri, &text, params.range) {
+            Ok(actions) => Ok((!actions.is_empty()).then_some(actions)),
+            Err(message) => {
+                self.client.log_message(MessageType::ERROR, message).await;
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn compute_lsp_formatting(
+    config_arguments: &ConfigArguments,
+    uri: &Url,
+    text: &str,
+) -> std::result::Result<Option<Vec<TextEdit>>, String> {
+    if is_config_document_uri(config_arguments, uri) {
+        return Ok(None);
+    }
+
+    let source_path = uri.to_file_path().ok();
+    let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let formatted = tidysql::format_with_config(text, &config).map_err(|err| err.to_string())?;
+
+    Ok(Some(vec![TextEdit { range: full_document_range(text), new_text: formatted }]))
 }
 
 fn compute_lsp_diagnostics(
@@ -233,8 +286,84 @@ fn compute_lsp_diagnostics(
     let source_path = uri.to_file_path().ok();
     let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
     let config = config_arguments.load_config(source_path)?;
-    let diagnostics = tidysql::check_with_config(text, &config);
+    let diagnostics = tidysql::check_for_editor_with_config(text, &config);
     Ok(diagnostics.iter().filter_map(|diagnostic| to_lsp_diagnostic(diagnostic, text)).collect())
+}
+
+fn compute_lsp_code_actions(
+    config_arguments: &ConfigArguments,
+    uri: &Url,
+    text: &str,
+    range: LspRange,
+) -> std::result::Result<CodeActionResponse, String> {
+    if is_config_document_uri(config_arguments, uri) {
+        return Ok(Vec::new());
+    }
+
+    let source_path = uri.to_file_path().ok();
+    let source_path = source_path.as_deref().unwrap_or_else(|| Path::new("."));
+    let config = config_arguments.load_config(source_path)?;
+    let diagnostics = tidysql::check_with_config(text, &config);
+    let mut actions = Vec::new();
+
+    for diagnostic in diagnostics.iter().filter(|diagnostic| diagnostic.fix.is_some()) {
+        let diagnostic_range = lsp_range(diagnostic.range.clone(), text);
+        if !ranges_overlap(diagnostic_range, range) {
+            continue;
+        }
+
+        let Some(fix) = &diagnostic.fix else {
+            continue;
+        };
+        let Some(lsp_diagnostic) = to_lsp_diagnostic(diagnostic, text) else {
+            continue;
+        };
+
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title: fix.title.clone(),
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![lsp_diagnostic]),
+            edit: Some(workspace_edit(
+                uri.clone(),
+                fix.edits.iter().map(|edit| TextEdit {
+                    range: lsp_range(text_range_to_range(edit.range), text),
+                    new_text: edit.replacement.clone(),
+                }),
+            )),
+            is_preferred: Some(true),
+            ..Default::default()
+        }));
+    }
+
+    let fixed = tidysql::fix_with_config(text, &config).map_err(|err| err.to_string())?;
+    if fixed != text {
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title: "Fix all TidySQL issues".to_string(),
+            kind: Some(CodeActionKind::from("source.fixAll.tidysql")),
+            edit: Some(workspace_edit(
+                uri.clone(),
+                [TextEdit { range: full_document_range(text), new_text: fixed }],
+            )),
+            is_preferred: Some(false),
+            ..Default::default()
+        }));
+    }
+
+    Ok(actions)
+}
+
+fn workspace_edit(uri: Url, edits: impl IntoIterator<Item = TextEdit>) -> WorkspaceEdit {
+    let mut changes = HashMap::new();
+    changes.insert(uri, edits.into_iter().collect());
+    WorkspaceEdit { changes: Some(changes), ..Default::default() }
+}
+
+fn text_range_to_range(range: tidysql_syntax::TextRange) -> ByteRange {
+    usize::from(range.start())..usize::from(range.end())
+}
+
+fn ranges_overlap(left: LspRange, right: LspRange) -> bool {
+    left.start < right.end && right.start < left.end
 }
 
 async fn is_latest_version(
@@ -306,6 +435,10 @@ fn lsp_range(range: ByteRange, text: &str) -> LspRange {
     }
 }
 
+fn full_document_range(text: &str) -> LspRange {
+    LspRange { start: Position::new(0, 0), end: offset_to_position(text, text.len()) }
+}
+
 fn clamp_range(range: ByteRange, source_len: usize) -> ByteRange {
     let start = range.start.min(source_len);
     let end = range.end.min(source_len);
@@ -350,19 +483,20 @@ mod tests {
     use tower::{Service, ServiceExt};
 
     use super::*;
-    use crate::{ConfigOverrideArgs, GlobalConfigArgs};
+    use crate::{CheckOverrideArgs, CoreOverrideArgs, GlobalConfigArgs, LintOverrideArgs};
 
     fn test_config_arguments(explicit: Option<PathBuf>) -> Arc<ConfigArguments> {
         Arc::new(ConfigArguments::from_cli_arguments(
             GlobalConfigArgs { config: explicit, isolated: false },
-            ConfigOverrideArgs {
-                dialect: None,
-                allow: Vec::new(),
-                warn: Vec::new(),
-                deny: Vec::new(),
-            }
-            .into(),
+            empty_check_overrides().into(),
         ))
+    }
+
+    fn empty_check_overrides() -> CheckOverrideArgs {
+        CheckOverrideArgs {
+            core: CoreOverrideArgs { dialect: None },
+            lints: LintOverrideArgs { allow: Vec::new(), warn: Vec::new(), deny: Vec::new() },
+        }
     }
 
     async fn initialize_service(service: &mut LspService<Backend>) {
@@ -380,6 +514,23 @@ mod tests {
             .unwrap();
 
         assert!(response.is_some(), "initialize should return a response");
+    }
+
+    async fn initialize_response(
+        service: &mut LspService<Backend>,
+    ) -> Option<tower_lsp::jsonrpc::Response> {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                tower_lsp::jsonrpc::Request::build("initialize")
+                    .params(json!({ "capabilities": {} }))
+                    .id(1)
+                    .finish(),
+            )
+            .await
+            .unwrap()
     }
 
     async fn next_publish_diagnostics(socket: &mut tower_lsp::ClientSocket) -> serde_json::Value {
@@ -432,6 +583,121 @@ respect_gitigore = true
         .unwrap_err();
 
         assert!(error.contains("unknown field `respect_gitigore`"));
+    }
+
+    #[test]
+    fn sql_diagnostics_use_quiet_editor_defaults() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let diagnostics =
+            compute_lsp_diagnostics(config, &uri, "SELECT COUNT(1) FROM foo WHERE x = NULL")
+                .unwrap();
+        let codes = diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.code.as_ref())
+            .filter_map(|code| match code {
+                NumberOrString::String(code) => Some(code.as_str()),
+                NumberOrString::Number(_) => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(codes.contains(&"null_comparison"));
+        assert!(!codes.contains(&"count_rows"));
+    }
+
+    #[test]
+    fn sql_formatting_returns_full_document_edit() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let edits =
+            compute_lsp_formatting(config.as_ref(), &uri, "select a,b from foo").unwrap().unwrap();
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].range.start, Position::new(0, 0));
+        assert_eq!(edits[0].range.end, Position::new(0, 19));
+        assert_eq!(edits[0].new_text, "SELECT a, b\nFROM foo");
+    }
+
+    #[test]
+    fn sql_code_actions_return_quick_fix_and_fix_all() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("query.sql");
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let actions = compute_lsp_code_actions(
+            config.as_ref(),
+            &uri,
+            "SELECT * FROM foo WHERE x = NULL",
+            LspRange { start: Position::new(0, 24), end: Position::new(0, 32) },
+        )
+        .unwrap();
+
+        let titles = actions
+            .iter()
+            .filter_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action) => Some(action.title.as_str()),
+                CodeActionOrCommand::Command(_) => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(titles.contains(&"Use IS / IS NOT for NULL comparisons"));
+        assert!(titles.contains(&"Fix all TidySQL issues"));
+    }
+
+    #[test]
+    fn config_documents_do_not_offer_sql_code_actions() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let actions = compute_lsp_code_actions(
+            config.as_ref(),
+            &uri,
+            "[core]\ndialect = \"ansi\"\n",
+            LspRange { start: Position::new(0, 0), end: Position::new(0, 0) },
+        )
+        .unwrap();
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn config_documents_do_not_format_as_sql() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(tidysql_config::DEFAULT_CONFIG_FILE);
+        let uri = Url::from_file_path(&path).unwrap();
+        let config = test_config_arguments(None);
+
+        let edits =
+            compute_lsp_formatting(config.as_ref(), &uri, "[core]\ndialect = \"ansi\"\n").unwrap();
+
+        assert!(edits.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_advertises_document_formatting() {
+        let config = ConfigArguments::from_cli_arguments(
+            GlobalConfigArgs { config: None, isolated: false },
+            empty_check_overrides().into(),
+        );
+        let (mut service, _socket) = LspService::new(|client| Backend::new(client, config));
+
+        let response = initialize_response(&mut service).await.unwrap();
+        let value = serde_json::to_value(response).unwrap();
+
+        assert_eq!(
+            value["result"]["capabilities"]["documentFormattingProvider"].as_bool(),
+            Some(true)
+        );
+        assert!(value["result"]["capabilities"]["codeActionProvider"].is_object());
     }
 
     #[test]
@@ -502,13 +768,7 @@ extend = "base.toml"
 
         let config = ConfigArguments::from_cli_arguments(
             GlobalConfigArgs { config: None, isolated: false },
-            ConfigOverrideArgs {
-                dialect: None,
-                allow: Vec::new(),
-                warn: Vec::new(),
-                deny: Vec::new(),
-            }
-            .into(),
+            empty_check_overrides().into(),
         );
         let (mut service, mut socket) = LspService::new(|client| Backend::new(client, config));
         initialize_service(&mut service).await;

@@ -4,6 +4,8 @@ import init, { Workspace } from 'tidysql-wasm'
 import {
   serializeWorkerError,
   type DialectOption,
+  type MonacoDiagnosticCategory,
+  type MonacoDiagnosticEditorDefault,
   type MonacoDiagnostic,
   type MonacoDiagnosticSeverity,
   type TidysqlWorkerRequest,
@@ -39,11 +41,41 @@ const normalizeSeverity = (value: unknown): MonacoDiagnosticSeverity => {
   }
 }
 
+const normalizeCategory = (value: unknown): MonacoDiagnosticCategory => {
+  switch (value) {
+    case 'suspicious':
+    case 'determinism':
+    case 'maintainability':
+    case 'policy':
+    case 'convention':
+    case 'formatting_compat':
+      return value
+    case 'correctness':
+    default:
+      return 'correctness'
+  }
+}
+
+const normalizeEditorDefault = (value: unknown): MonacoDiagnosticEditorDefault => {
+  switch (value) {
+    case 'save':
+    case 'hidden':
+      return value
+    case 'live':
+    default:
+      return 'live'
+  }
+}
+
 const normalizeDiagnostic = (value: unknown): MonacoDiagnostic => {
   if (!value || typeof value !== 'object') {
     return {
+      code: '',
       message: '',
       severity: 'info',
+      category: 'correctness',
+      editorDefault: 'live',
+      fixable: false,
       start: { line: 1, column: 1 },
       end: { line: 1, column: 1 },
       source: 'sql',
@@ -51,12 +83,17 @@ const normalizeDiagnostic = (value: unknown): MonacoDiagnostic => {
   }
 
   const candidate = value as Partial<MonacoDiagnostic>
+  const rawCandidate = value as Partial<MonacoDiagnostic> & { editor_default?: unknown }
   const start = candidate.start ?? { line: 1, column: 1 }
   const end = candidate.end ?? start
 
   return {
+    code: typeof candidate.code === 'string' ? candidate.code : '',
     message: typeof candidate.message === 'string' ? candidate.message : '',
     severity: normalizeSeverity(candidate.severity),
+    category: normalizeCategory(candidate.category),
+    editorDefault: normalizeEditorDefault(candidate.editorDefault ?? rawCandidate.editor_default),
+    fixable: candidate.fixable === true,
     start: {
       line: typeof start.line === 'number' ? start.line : 1,
       column: typeof start.column === 'number' ? start.column : 1,

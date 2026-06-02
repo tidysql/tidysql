@@ -263,7 +263,10 @@ mod tests {
         BatchInputPlan, ExecutionPlan, FileJob, FileResult, discover_jobs_with, execution_plan,
     };
     use crate::paths::normalize_path;
-    use crate::{ConfigArguments, ConfigOverrideArgs, ConfigOverrides, GlobalConfigArgs};
+    use crate::{
+        CheckOverrideArgs, ConfigArguments, ConfigOverrides, CoreOverrideArgs, GlobalConfigArgs,
+        LintOverrideArgs,
+    };
 
     fn discover_jobs(
         plan: BatchInputPlan,
@@ -331,11 +334,9 @@ mod tests {
         };
         let config_arguments = ConfigArguments::from_cli_arguments(
             GlobalConfigArgs { config: None, isolated: false },
-            ConfigOverrides::from(ConfigOverrideArgs {
-                dialect: None,
-                allow: Vec::new(),
-                warn: Vec::new(),
-                deny: Vec::new(),
+            ConfigOverrides::from(CheckOverrideArgs {
+                core: CoreOverrideArgs { dialect: None },
+                lints: LintOverrideArgs { allow: Vec::new(), warn: Vec::new(), deny: Vec::new() },
             }),
         );
 

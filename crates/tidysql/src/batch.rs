@@ -45,6 +45,6 @@ pub(crate) enum FileOutcome {
 #[derive(Clone, Copy)]
 pub(crate) enum BatchCommandKind {
     Check { fix: bool },
-    FormatWrite,
-    FormatCheck,
+    FormatWrite { strict: bool },
+    FormatCheck { strict: bool },
 }

@@ -4,7 +4,11 @@
 
 **Summary:** Removes redundant ELSE NULL branches from CASE expressions.
 
-**Default level:** `warn`
+**Category:** `maintainability`
+
+**Editor default:** `save`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

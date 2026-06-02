@@ -4,6 +4,10 @@
 
 **Summary:** Requires column aliases to be unique within a SELECT clause.
 
+**Category:** `correctness`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** no

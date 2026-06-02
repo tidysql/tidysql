@@ -4,6 +4,10 @@
 
 **Summary:** Requires UNION to explicitly specify ALL or DISTINCT.
 
+**Category:** `policy`
+
+**Editor default:** `save`
+
 **Default level:** `warn`
 
 **Fixable:** yes

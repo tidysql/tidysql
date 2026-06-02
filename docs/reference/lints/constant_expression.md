@@ -4,6 +4,10 @@
 
 **Summary:** Flags constant or self-comparing expressions.
 
+**Category:** `correctness`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** no

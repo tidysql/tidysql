@@ -17,7 +17,6 @@ mod else_null;
 mod explicit_union;
 mod identifier;
 mod identifier_characters;
-mod keyword_case;
 mod keyword_identifier;
 pub mod metadata;
 mod not_equal_style;
@@ -78,13 +77,11 @@ pub(crate) struct LintContext<'a> {
     pub(crate) dialect: DialectKind,
     pub(crate) tree: &'a SyntaxTree,
     pub(crate) config: &'a Config,
-    pub(crate) inferred_keyword_policy: Cell<Option<tidysql_config::CapitalisationPolicy>>,
     pub(crate) inferred_not_equal_style: Cell<Option<NotEqualStyle>>,
 }
 
 pub(crate) trait TokenPass {
     const CODE: &'static str;
-    const FIX_PHASE: FixPhase = FixPhase::Structural;
 
     fn matches(kind: SyntaxKind) -> bool;
     fn level(config: &Config) -> Severity;
@@ -147,13 +144,8 @@ const fn lint_enabled(level: Severity) -> bool {
 }
 
 pub fn run(dialect: DialectKind, tree: &SyntaxTree, config: &Config) -> Vec<Diagnostic> {
-    let ctx = LintContext {
-        dialect,
-        tree,
-        config,
-        inferred_keyword_policy: Cell::new(None),
-        inferred_not_equal_style: Cell::new(None),
-    };
+    let ctx =
+        LintContext { dialect, tree, config, inferred_not_equal_style: std::cell::Cell::new(None) };
     let mut diagnostics = Vec::new();
 
     for element in tree.root().descendants_with_tokens() {
@@ -204,7 +196,6 @@ fn run_statement_passes(
 fn run_token_passes(ctx: &LintContext<'_>, token: &SyntaxToken, diagnostics: &mut Vec<Diagnostic>) {
     run_token_pass::<disallow_names::DisallowNames>(ctx, token, diagnostics);
     run_token_pass::<identifier_characters::IdentifierCharacters>(ctx, token, diagnostics);
-    run_token_pass::<keyword_case::KeywordCase>(ctx, token, diagnostics);
     run_token_pass::<keyword_identifier::KeywordIdentifier>(ctx, token, diagnostics);
 }
 

@@ -4,6 +4,10 @@
 
 **Summary:** Requires IS or IS NOT for NULL checks.
 
+**Category:** `correctness`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** yes

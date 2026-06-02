@@ -4,7 +4,11 @@
 
 **Summary:** Removes table aliases that are never referenced.
 
-**Default level:** `warn`
+**Category:** `maintainability`
+
+**Editor default:** `save`
+
+**Default level:** `hint`
 
 **Fixable:** yes
 

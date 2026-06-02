@@ -294,6 +294,64 @@ pub struct Core {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum FormatKeywordCase {
+    #[default]
+    Upper,
+    Lower,
+    Preserve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FormatCommaStyle {
+    #[default]
+    Trailing,
+    Leading,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Format {
+    pub line_width: usize,
+    pub indent_width: usize,
+    pub keyword_case: FormatKeywordCase,
+    pub comma_style: FormatCommaStyle,
+}
+
+impl Default for Format {
+    fn default() -> Self {
+        Self {
+            line_width: 100,
+            indent_width: 4,
+            keyword_case: FormatKeywordCase::Upper,
+            comma_style: FormatCommaStyle::Trailing,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DiagnosticsProfile {
+    #[default]
+    Quiet,
+    Recommended,
+    Strict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Diagnostics {
+    pub profile: DiagnosticsProfile,
+}
+
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self { profile: DiagnosticsProfile::Quiet }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     #[serde(alias = "deny")]
     Error,
@@ -555,7 +613,18 @@ define_lints! {
 impl Default for Lints {
     fn default() -> Self {
         Self {
+            count_rows: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            disallow_names: LintConfig { level: Severity::Allow, ..LintConfig::default() },
+            else_null: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            identifier_characters: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            keyword_identifier: LintConfig { level: Severity::Hint, ..LintConfig::default() },
             keyword_case: LintConfig { level: Severity::Allow, ..LintConfig::default() },
+            not_equal_style: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            order_by_direction: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            self_alias_column: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            simple_case: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            unused_cte: LintConfig { level: Severity::Hint, ..LintConfig::default() },
+            unused_table_alias: LintConfig { level: Severity::Hint, ..LintConfig::default() },
             ..Self::warn_defaults()
         }
     }
@@ -618,6 +687,8 @@ pub struct UnusedTableAliasConfig {}
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub core: Core,
+    pub format: Format,
+    pub diagnostics: Diagnostics,
     pub lints: Lints,
 }
 
@@ -651,6 +722,8 @@ pub struct ConfigFile {
     pub extend: Option<PathBuf>,
     pub files: FilesConfig,
     pub core: Core,
+    pub format: Format,
+    pub diagnostics: Diagnostics,
     pub lints: Lints,
 }
 
@@ -749,8 +822,9 @@ impl Config {
     }
 
     pub fn from_toml_str(input: &str) -> Result<Self, ConfigError> {
-        toml::from_str(input)
-            .map_err(|source| ConfigError::Toml { path: None, source: Box::new(source) })
+        let mut table = parse_config_table(input, None)?;
+        normalize_keyword_case_alias(&mut table);
+        parse_config_from_table(table, None)
     }
 
     pub fn set_lint_level(&mut self, lint: LintName, level: Severity) {
@@ -766,7 +840,10 @@ pub fn read_config(path: impl AsRef<Path>) -> Result<(PathBuf, String), ConfigEr
 }
 
 pub fn parse_config(input: &str, path: Option<PathBuf>) -> Result<Config, ConfigError> {
-    let config: ConfigFile = toml::from_str(input)
+    let mut table = parse_config_table(input, path.clone())?;
+    normalize_keyword_case_alias(&mut table);
+    let config: ConfigFile = toml::Value::Table(table)
+        .try_into()
         .map_err(|source| ConfigError::Toml { path, source: Box::new(source) })?;
     Ok(config.config())
 }
@@ -814,7 +891,12 @@ const DEFAULT_EXCLUDES: &[&str] = &[
 
 impl ConfigFile {
     fn config(self) -> Config {
-        Config { core: self.core, lints: self.lints }
+        Config {
+            core: self.core,
+            format: self.format,
+            diagnostics: self.diagnostics,
+            lints: self.lints,
+        }
     }
 }
 
@@ -1023,6 +1105,7 @@ impl ConfigResolver {
         let (path, input) = read_config(&path)?;
         let raw_config = parse_raw_config(&input, Some(path.clone()))?;
         let mut table = parse_config_table(&input, Some(path.clone()))?;
+        normalize_keyword_case_alias(&mut table);
         let extend = resolve_extend_path(&path, raw_config.extend.as_deref())?;
 
         let parent = match extend {
@@ -1176,9 +1259,73 @@ fn parse_config_from_table(
     table: toml::Table,
     path: Option<PathBuf>,
 ) -> Result<Config, ConfigError> {
+    reject_keyword_case_conflict(&table, path.clone())?;
     toml::Value::Table(table)
         .try_into()
         .map_err(|source| ConfigError::Toml { path, source: Box::new(source) })
+}
+
+fn normalize_keyword_case_alias(table: &mut toml::Table) {
+    if table
+        .get("format")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|format| format.contains_key("keyword_case"))
+    {
+        return;
+    }
+
+    let Some(keyword_case) = keyword_case_alias(table) else {
+        return;
+    };
+    let format =
+        table.entry("format".to_string()).or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if let toml::Value::Table(format) = format {
+        format.insert("keyword_case".to_string(), toml::Value::String(keyword_case.to_string()));
+    }
+}
+
+fn keyword_case_alias(table: &toml::Table) -> Option<&'static str> {
+    let policy = table
+        .get("lints")
+        .and_then(toml::Value::as_table)?
+        .get("keyword_case")
+        .and_then(toml::Value::as_table)?
+        .get("policy")
+        .and_then(toml::Value::as_str)?;
+
+    match policy {
+        "upper" => Some("upper"),
+        "lower" | "snake" | "camel" => Some("lower"),
+        _ => None,
+    }
+}
+
+fn reject_keyword_case_conflict(
+    table: &toml::Table,
+    path: Option<PathBuf>,
+) -> Result<(), ConfigError> {
+    let Some(format_case) = table
+        .get("format")
+        .and_then(toml::Value::as_table)
+        .and_then(|format| format.get("keyword_case"))
+        .and_then(toml::Value::as_str)
+    else {
+        return Ok(());
+    };
+
+    let Some(alias_case) = keyword_case_alias(table) else {
+        return Ok(());
+    };
+
+    if format_case == alias_case {
+        return Ok(());
+    }
+
+    let source = toml::de::Error::custom(format!(
+        "conflicting keyword casing: [format].keyword_case is `{format_case}`, but \
+         [lints].keyword_case.policy maps to `{alias_case}`; prefer [format].keyword_case"
+    ));
+    Err(ConfigError::Toml { path, source: Box::new(source) })
 }
 
 fn parse_raw_config(input: &str, path: Option<PathBuf>) -> Result<RawConfigFile, ConfigError> {
@@ -1199,7 +1346,7 @@ fn resolve_extend_path(
 fn merge_config_table(parent: &mut toml::Table, child: &mut toml::Table) {
     for (key, value) in std::mem::take(child) {
         match key.as_str() {
-            "core" | "lints" => merge_nested_table(parent, key, value),
+            "core" | "format" | "diagnostics" | "lints" => merge_nested_table(parent, key, value),
             _ => {
                 parent.insert(key, value);
             }
@@ -1332,6 +1479,160 @@ disallow_names = { level = "error", names = ["bar"] }
     }
 
     #[test]
+    fn format_defaults_are_applied() {
+        let config = Config::from_toml_str("").unwrap();
+
+        assert_eq!(config.format.line_width, 100);
+        assert_eq!(config.format.indent_width, 4);
+        assert_eq!(config.format.keyword_case, FormatKeywordCase::Upper);
+        assert_eq!(config.format.comma_style, FormatCommaStyle::Trailing);
+        assert_eq!(config.diagnostics.profile, DiagnosticsProfile::Quiet);
+    }
+
+    #[test]
+    fn diagnostics_options_parse_from_toml() {
+        let config = Config::from_toml_str(
+            r#"
+[diagnostics]
+profile = "recommended"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.diagnostics.profile, DiagnosticsProfile::Recommended);
+    }
+
+    #[test]
+    fn lint_defaults_follow_quiet_ownership_model() {
+        let config = Config::from_toml_str("").unwrap();
+
+        assert_eq!(config.lints.keyword_case.level, Severity::Allow);
+        assert_eq!(config.lints.disallow_names.level, Severity::Allow);
+
+        assert_eq!(config.lints.consecutive_semicolons.level, Severity::Warn);
+        assert_eq!(config.lints.constant_expression.level, Severity::Warn);
+        assert_eq!(config.lints.distinct_parentheses.level, Severity::Warn);
+        assert_eq!(config.lints.explicit_union.level, Severity::Warn);
+        assert_eq!(config.lints.null_comparison.level, Severity::Warn);
+        assert_eq!(config.lints.require_order_by.level, Severity::Warn);
+        assert_eq!(config.lints.unique_column_alias.level, Severity::Warn);
+        assert_eq!(config.lints.unique_table_alias.level, Severity::Warn);
+
+        assert_eq!(config.lints.count_rows.level, Severity::Hint);
+        assert_eq!(config.lints.else_null.level, Severity::Hint);
+        assert_eq!(config.lints.identifier_characters.level, Severity::Hint);
+        assert_eq!(config.lints.keyword_identifier.level, Severity::Hint);
+        assert_eq!(config.lints.not_equal_style.level, Severity::Hint);
+        assert_eq!(config.lints.order_by_direction.level, Severity::Hint);
+        assert_eq!(config.lints.self_alias_column.level, Severity::Hint);
+        assert_eq!(config.lints.simple_case.level, Severity::Hint);
+        assert_eq!(config.lints.unused_cte.level, Severity::Hint);
+        assert_eq!(config.lints.unused_table_alias.level, Severity::Hint);
+    }
+
+    #[test]
+    fn format_options_parse_from_toml() {
+        let config = Config::from_toml_str(
+            r#"
+[format]
+line_width = 88
+indent_width = 2
+keyword_case = "lower"
+comma_style = "leading"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.format.line_width, 88);
+        assert_eq!(config.format.indent_width, 2);
+        assert_eq!(config.format.keyword_case, FormatKeywordCase::Lower);
+        assert_eq!(config.format.comma_style, FormatCommaStyle::Leading);
+    }
+
+    #[test]
+    fn lint_keyword_case_policy_is_format_compatibility_alias() {
+        let config = Config::from_toml_str(
+            r#"
+[lints]
+keyword_case = { level = "warn", policy = "lower" }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.format.keyword_case, FormatKeywordCase::Lower);
+    }
+
+    #[test]
+    fn conflicting_format_keyword_case_and_lint_alias_are_rejected() {
+        let error = Config::from_toml_str(
+            r#"
+[format]
+keyword_case = "lower"
+
+[lints]
+keyword_case = { level = "warn", policy = "upper" }
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("conflicting keyword casing"));
+    }
+
+    #[test]
+    fn matching_format_keyword_case_and_lint_alias_are_allowed() {
+        let config = Config::from_toml_str(
+            r#"
+[format]
+keyword_case = "upper"
+
+[lints]
+keyword_case = { level = "warn", policy = "upper" }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.format.keyword_case, FormatKeywordCase::Upper);
+    }
+
+    #[test]
+    fn format_rejects_unknown_options() {
+        let error = Config::from_toml_str(
+            r#"
+[format]
+indent = 2
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("unknown field `indent`"));
+    }
+
+    #[test]
+    fn format_rejects_invalid_enums() {
+        let error = Config::from_toml_str(
+            r#"
+[format]
+keyword_case = "title"
+"#,
+        )
+        .unwrap_err();
+
+        let ConfigError::Toml { source, .. } = error else {
+            panic!("expected toml error");
+        };
+
+        assert!(source.to_string().contains("unknown variant `title`"));
+    }
+
+    #[test]
     fn keyword_case_regex_error_reports_field_path() {
         let error = Config::from_toml_str(
             r#"
@@ -1440,6 +1741,69 @@ dialect = "snowflake"
         assert!(resolved.matches_discovered_file(&dir.path().join("schema.ddl")));
         assert!(!resolved.matches_discovered_file(&dir.path().join("generated/out.sql")));
         assert!(!resolved.matches_discovered_file(&dir.path().join("vendor/out.sql")));
+    }
+
+    #[test]
+    fn extended_configs_merge_format_options() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("parent.toml");
+        let child = dir.path().join("child.toml");
+
+        fs::write(
+            &parent,
+            r#"
+[format]
+line_width = 88
+indent_width = 2
+comma_style = "leading"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &child,
+            r#"
+extend = "parent.toml"
+
+[format]
+keyword_case = "lower"
+"#,
+        )
+        .unwrap();
+
+        let resolved = ConfigResolver::new().resolve_explicit(&child).unwrap();
+        assert_eq!(resolved.config().format.line_width, 88);
+        assert_eq!(resolved.config().format.indent_width, 2);
+        assert_eq!(resolved.config().format.keyword_case, FormatKeywordCase::Lower);
+        assert_eq!(resolved.config().format.comma_style, FormatCommaStyle::Leading);
+    }
+
+    #[test]
+    fn extended_configs_apply_keyword_case_alias_before_merge() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("parent.toml");
+        let child = dir.path().join("child.toml");
+
+        fs::write(
+            &parent,
+            r#"
+[format]
+keyword_case = "lower"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &child,
+            r#"
+extend = "parent.toml"
+
+[lints]
+keyword_case = { level = "warn", policy = "upper" }
+"#,
+        )
+        .unwrap();
+
+        let resolved = ConfigResolver::new().resolve_explicit(&child).unwrap();
+        assert_eq!(resolved.config().format.keyword_case, FormatKeywordCase::Upper);
     }
 
     #[test]

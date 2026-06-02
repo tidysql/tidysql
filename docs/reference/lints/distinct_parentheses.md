@@ -4,6 +4,10 @@
 
 **Summary:** Disallows DISTINCT used like a function call.
 
+**Category:** `suspicious`
+
+**Editor default:** `live`
+
 **Default level:** `warn`
 
 **Fixable:** yes
